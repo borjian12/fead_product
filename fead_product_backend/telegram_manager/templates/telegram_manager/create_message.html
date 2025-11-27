@@ -1,0 +1,101 @@
+<!-- telegram_manager/templates/telegram_manager/create_message.html -->
+{% extends 'telegram_manager/base.html' %}
+
+{% block title %}Create Message - Telegram Manager{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="card-title mb-0">
+                    <i class="fas fa-plus"></i> Create New Message
+                </h4>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+
+                    <div class="mb-3">
+                        <label for="channel" class="form-label">Select Channel</label>
+                        <select class="form-select" id="channel" name="channel" required>
+                            <option value="">Choose a channel...</option>
+                            {% for channel in channels %}
+                                <option value="{{ channel.id }}"
+                                    {% if selected_channel_id == channel.id|stringformat:"s" %}selected{% endif %}>
+                                    {{ channel.name }} (@{{ channel.username }}) - {{ channel.get_country_display }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="message_text" class="form-label">Message Text</label>
+                        <textarea class="form-control" id="message_text" name="message_text"
+                                  rows="6" placeholder="Enter your message here..." required></textarea>
+                        <div class="form-text">
+                            You can use HTML formatting for your message.
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="images" class="form-label">Image URLs</label>
+                        <textarea class="form-control" id="images" name="images"
+                                  rows="3" placeholder="Enter image URLs, one per line"></textarea>
+                        <div class="form-text">
+                            Enter one image URL per line. Leave empty for text-only message.
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-save"></i> Save as Draft
+                        </button>
+                        <a href="{% url 'telegram_manager:message_list' %}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Channel Info -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-info-circle"></i> Available Channels
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for channel in channels %}
+                        <div class="col-md-6 mb-3">
+                            <div class="d-flex align-items-center">
+                                {% if channel.logo %}
+                                    <img src="{{ channel.logo.url }}" alt="{{ channel.name }}" class="channel-logo me-3">
+                                {% else %}
+                                    <div class="channel-logo bg-primary d-flex align-items-center justify-content-center me-3">
+                                        <i class="fas fa-hashtag text-white"></i>
+                                    </div>
+                                {% endif %}
+                                <div>
+                                    <strong>{{ channel.name }}</strong>
+                                    <br>
+                                    <small class="text-muted">
+                                        @{{ channel.username }} • {{ channel.get_country_display }}
+                                    </small>
+                                    <br>
+                                    <a href="{% url 'telegram_manager:create_message' channel.id %}"
+                                       class="btn btn-outline-primary btn-sm mt-1">
+                                        Select
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

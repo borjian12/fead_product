@@ -1,0 +1,108 @@
+<!-- telegram_manager/templates/telegram_manager/message_list.html -->
+{% extends 'telegram_manager/base.html' %}
+
+{% block title %}My Messages - Telegram Manager{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-envelope"></i> My Messages</h1>
+    <a href="{% url 'telegram_manager:create_message' %}" class="btn btn-primary">
+        <i class="fas fa-plus"></i> Create New Message
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        {% if messages %}
+            {% for message_obj in messages %}
+                <div class="card mb-3 message-card message-{{ message_obj.status }}">
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="d-flex align-items-center mb-2">
+                                    {% if message_obj.channel.logo %}
+                                        <img src="{{ message_obj.channel.logo.url }}" alt="{{ message_obj.channel.name }}" class="channel-logo me-3">
+                                    {% else %}
+                                        <div class="channel-logo bg-secondary d-flex align-items-center justify-content-center me-3">
+                                            <i class="fas fa-hashtag text-white"></i>
+                                        </div>
+                                    {% endif %}
+                                    <div>
+                                        <h5 class="card-title mb-0">{{ message_obj.channel.name }}</h5>
+                                        <small class="text-muted">@{{ message_obj.channel.username }} • {{ message_obj.channel.get_country_display }}</small>
+                                    </div>
+                                </div>
+
+                                <p class="card-text">{{ message_obj.message_text|truncatewords:30 }}</p>
+
+                                {% if message_obj.images %}
+                                    <div class="mb-2">
+                                        <small class="text-muted">
+                                            <i class="fas fa-image"></i> {{ message_obj.images|length }} image(s)
+                                        </small>
+                                    </div>
+                                {% endif %}
+
+                                <div class="message-status">
+                                    <span class="badge
+                                        {% if message_obj.status == 'sent' %}bg-success
+                                        {% elif message_obj.status == 'draft' %}bg-secondary
+                                        {% elif message_obj.status == 'failed' %}bg-danger
+                                        {% else %}bg-warning{% endif %}">
+                                        {{ message_obj.get_status_display }}
+                                    </span>
+                                    {% if message_obj.telegram_message_id %}
+                                        <small class="text-muted ms-2">
+                                            Telegram ID: {{ message_obj.telegram_message_id }}
+                                        </small>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div class="d-flex flex-column gap-2">
+                                    <small class="text-muted">
+                                        Created: {{ message_obj.created_at|date:"M d, Y H:i" }}
+                                    </small>
+                                    {% if message_obj.sent_at %}
+                                        <small class="text-muted">
+                                            Sent: {{ message_obj.sent_at|date:"M d, Y H:i" }}
+                                        </small>
+                                    {% endif %}
+
+                                    <div class="btn-group mt-2">
+                                        {% if message_obj.status == 'draft' or message_obj.status == 'failed' %}
+                                            <a href="{% url 'telegram_manager:send_message' message_obj.id %}" class="btn btn-success btn-sm">
+                                                <i class="fas fa-paper-plane"></i> Send
+                                            </a>
+                                        {% endif %}
+
+                                        <a href="{% url 'telegram_manager:edit_message' message_obj.id %}" class="btn btn-primary btn-sm">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </a>
+
+                                        <a href="{% url 'telegram_manager:delete_message' message_obj.id %}"
+                                           class="btn btn-danger btn-sm"
+                                           onclick="return confirm('Are you sure you want to delete this message?')">
+                                            <i class="fas fa-trash"></i> Delete
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                <h3>No messages yet</h3>
+                <p class="text-muted">Create your first message to get started</p>
+                <a href="{% url 'telegram_manager:create_message' %}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Create First Message
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

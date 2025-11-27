@@ -1,0 +1,140 @@
+<!-- telegram_manager/templates/telegram_manager/edit_message.html -->
+{% extends 'telegram_manager/base.html' %}
+
+{% block title %}Edit Message - Telegram Manager{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="card-title mb-0">
+                    <i class="fas fa-edit"></i> Edit Message
+                </h4>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+
+                    <div class="mb-3">
+                        <label class="form-label">Channel</label>
+                        <div class="form-control bg-light">
+                            <div class="d-flex align-items-center">
+                                {% if message.channel.logo %}
+                                    <img src="{{ message.channel.logo.url }}" alt="{{ message.channel.name }}" class="channel-logo me-3">
+                                {% else %}
+                                    <div class="channel-logo bg-secondary d-flex align-items-center justify-content-center me-3">
+                                        <i class="fas fa-hashtag text-white"></i>
+                                    </div>
+                                {% endif %}
+                                <div>
+                                    <strong>{{ message.channel.name }}</strong>
+                                    <br>
+                                    <small class="text-muted">
+                                        @{{ message.channel.username }} • {{ message.channel.get_country_display }}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="message_text" class="form-label">Message Text</label>
+                        <textarea class="form-control" id="message_text" name="message_text"
+                                  rows="6" required>{{ message.message_text }}</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="images" class="form-label">Image URLs</label>
+                        <textarea class="form-control" id="images" name="images"
+                                  rows="3" placeholder="Enter image URLs, one per line">{% for image in message.images %}{{ image }}{% if not forloop.last %}&#10;{% endif %}{% endfor %}</textarea>
+                        <div class="form-text">
+                            Enter one image URL per line. Leave empty for text-only message.
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="card-title mb-0">Message Status</h6>
+                            </div>
+                            <div class="card-body">
+                                <span class="badge
+                                    {% if message.status == 'sent' %}bg-success
+                                    {% elif message.status == 'draft' %}bg-secondary
+                                    {% elif message.status == 'failed' %}bg-danger
+                                    {% else %}bg-warning{% endif %}">
+                                    {{ message.get_status_display }}
+                                </span>
+                                {% if message.telegram_message_id %}
+                                    <small class="text-muted ms-2">
+                                        Telegram ID: {{ message.telegram_message_id }}
+                                    </small>
+                                {% endif %}
+                                <br>
+                                <small class="text-muted">
+                                    Created: {{ message.created_at|date:"M d, Y H:i" }}
+                                    {% if message.sent_at %}
+                                        | Sent: {{ message.sent_at|date:"M d, Y H:i" }}
+                                    {% endif %}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Update Message
+                        </button>
+
+                        {% if message.status == 'draft' or message.status == 'failed' %}
+                            <a href="{% url 'telegram_manager:send_message' message.id %}" class="btn btn-success">
+                                <i class="fas fa-paper-plane"></i> Send Now
+                            </a>
+                        {% endif %}
+
+                        <a href="{% url 'telegram_manager:message_list' %}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Cancel
+                        </a>
+
+                        <a href="{% url 'telegram_manager:delete_message' message.id %}"
+                           class="btn btn-danger ms-auto"
+                           onclick="return confirm('Are you sure you want to delete this message?')">
+                            <i class="fas fa-trash"></i> Delete
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Edit History -->
+        {% if message.edit_history.all %}
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-history"></i> Edit History
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% for history in message.edit_history.all %}
+                        <div class="border-start border-3 border-primary ps-3 mb-3">
+                            <div class="d-flex justify-content-between">
+                                <strong>{{ history.edited_by.username }}</strong>
+                                <small class="text-muted">{{ history.edited_at|date:"M d, Y H:i" }}</small>
+                            </div>
+                            <small class="text-muted">
+                                Telegram update:
+                                {% if history.telegram_edit_success %}
+                                    <span class="text-success">Success</span>
+                                {% else %}
+                                    <span class="text-danger">Failed</span>
+                                {% endif %}
+                            </small>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
