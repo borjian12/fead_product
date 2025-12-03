@@ -3,6 +3,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 import uuid
+import os
 
 
 def country_icon_upload_path(instance, filename):
@@ -19,8 +20,41 @@ def country_flag_upload_path(instance, filename):
     return f'countries/flags/{filename}'
 
 
+class Currency(models.Model):
+    """مدیریت ارزها و نرخ تبدیل"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Currency"
+        verbose_name_plural = "Currencies"
+        ordering = ['code']
+        db_table = "currencies"
+
+    code = models.CharField(max_length=3, unique=True, verbose_name="Currency Code", primary_key=True)
+    name = models.CharField(max_length=100, verbose_name="Currency Name")
+    exchange_rate_to_cny = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        verbose_name="Exchange Rate to CNY"
+    )
+    symbol = models.CharField(max_length=5, blank=True, verbose_name="Symbol")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
 class Country(models.Model):
     """مدیریت کامل کشورها"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Country"
+        verbose_name_plural = "Countries"
+        ordering = ['display_order', 'name']
+        db_table = "countries"
+
     CODE_CHOICES = [
         ('US', 'United States'),
         ('UK', 'United Kingdom'),
@@ -43,24 +77,26 @@ class Country(models.Model):
         ('SE', 'Sweden'),
     ]
 
-    code = models.CharField(max_length=2, choices=CODE_CHOICES, unique=True, verbose_name="Country Code")
+    # اطلاعات پایه
+    code = models.CharField(max_length=2, choices=CODE_CHOICES, unique=True, verbose_name="Country Code",
+                            primary_key=True)
     name = models.CharField(max_length=100, verbose_name="Country Name")
     native_name = models.CharField(max_length=100, blank=True, verbose_name="Native Name")
 
-    # آیکون و پرچم
+    # رسانه
     icon = models.ImageField(
         upload_to=country_icon_upload_path,
         blank=True,
         null=True,
         verbose_name="Country Icon",
-        help_text="Small icon for the country"
+        help_text="آیکون کوچک برای کشور"
     )
     flag = models.ImageField(
         upload_to=country_flag_upload_path,
         blank=True,
         null=True,
         verbose_name="Country Flag",
-        help_text="National flag of the country"
+        help_text="پرچم ملی کشور"
     )
 
     # تنظیمات آمازون
@@ -68,53 +104,67 @@ class Country(models.Model):
         max_length=50,
         default="amazon.com",
         verbose_name="Amazon Domain",
-        help_text="e.g., amazon.com, amazon.co.uk, amazon.de"
+        help_text="مثال: amazon.com, amazon.co.uk, amazon.de"
     )
     amazon_url = models.URLField(
         blank=True,
         verbose_name="Amazon Base URL",
-        help_text="Base URL for Amazon in this country"
+        help_text="URL پایه آمازون در این کشور"
     )
 
-    # تنظیمات ارز
+    # تنظیمات منطقه‌ای
     default_currency = models.ForeignKey(
-        'Currency',
+        Currency,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         verbose_name="Default Currency",
-        help_text="Default currency for this country"
+        help_text="ارز پیش‌فرض برای این کشور"
     )
-
-    # تنظیمات منطقه‌ای
     timezone = models.CharField(
         max_length=50,
         default="UTC",
         verbose_name="Timezone",
-        help_text="e.g., America/New_York, Europe/London"
+        help_text="مثال: America/New_York, Europe/London"
     )
     language = models.CharField(
         max_length=10,
         default="en",
         verbose_name="Language Code",
-        help_text="e.g., en, de, fr, es"
+        help_text="مثال: en, de, fr, es"
+    )
+
+    # موقعیت جغرافیایی پیش‌فرض برای کراولینگ
+    default_zip_code = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="Default ZIP Code",
+        help_text="کد پستی پیش‌فرض برای تنظیم موقعیت در آمازون"
+    )
+    default_city = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Default City",
+        help_text="شهر پیش‌فرض برای تنظیم موقعیت"
+    )
+    default_state = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Default State",
+        help_text="استان پیش‌فرض برای تنظیم موقعیت"
     )
 
     # وضعیت
     is_active = models.BooleanField(default=True, verbose_name="Active")
     is_available_for_products = models.BooleanField(default=True, verbose_name="Available for Products")
+    is_available_for_crawling = models.BooleanField(default=True, verbose_name="Available for Crawling")
 
     # ترتیب نمایش
     display_order = models.IntegerField(default=0, verbose_name="Display Order")
 
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Country"
-        verbose_name_plural = "Countries"
-        ordering = ['display_order', 'name']
-        db_table = "countries"
+    # زمان‌ها
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
     def __str__(self):
         return f"{self.name} ({self.code})"
@@ -134,16 +184,89 @@ class Country(models.Model):
     def get_related_channels(self):
         """دریافت کانال‌های مرتبط با این کشور"""
         from telegram_manager.models import TelegramChannel
-        return TelegramChannel.objects.filter(country=self.code, is_active=True)
+        try:
+            return TelegramChannel.objects.filter(country=self.code, is_active=True)
+        except ImportError:
+            return TelegramChannel.objects.none()
 
     def get_primary_channel(self):
         """دریافت کانال اصلی برای این کشور"""
         channels = self.get_related_channels()
         return channels.first()
 
+    def get_currency_code(self):
+        """دریافت کد ارز"""
+        if self.default_currency:
+            return self.default_currency.code
+        # ارز پیش‌فرض بر اساس کشور
+        currency_map = {
+            'US': 'USD', 'UK': 'GBP', 'DE': 'EUR', 'FR': 'EUR', 'IT': 'EUR',
+            'ES': 'EUR', 'CA': 'CAD', 'AU': 'AUD', 'JP': 'JPY', 'IN': 'INR',
+            'BR': 'BRL', 'TR': 'TRY', 'AE': 'AED', 'SA': 'SAR', 'CN': 'CNY',
+            'KR': 'KRW', 'NL': 'EUR', 'SE': 'SEK', 'IR': 'IRR'
+        }
+        return currency_map.get(self.code, 'USD')
+
+    def get_amazon_settings(self):
+        """دریافت تنظیمات آمازون برای کراولینگ"""
+        return {
+            'domain': self.amazon_domain,
+            'base_url': self.amazon_url,
+            'language': self.language,
+            'currency': self.get_currency_code(),
+            'zip_code': self.default_zip_code,
+            'city': self.default_city,
+            'state': self.default_state,
+            'timezone': self.timezone
+        }
+
+    @property
+    def has_amazon(self):
+        """آیا این کشور آمازون دارد؟"""
+        return bool(self.amazon_domain and self.amazon_domain != 'amazon.com')
+
+    @classmethod
+    def get_amazon_countries(cls):
+        """دریافت کشورهای دارای آمازون"""
+        return cls.objects.filter(
+            is_active=True,
+            is_available_for_crawling=True
+        ).exclude(amazon_domain='')
+
+    def clean(self):
+        """اعتبارسنجی مدل"""
+        from django.core.exceptions import ValidationError
+
+        if self.amazon_domain and 'amazon.' not in self.amazon_domain:
+            raise ValidationError({
+                'amazon_domain': 'دامنه آمازون باید شامل "amazon." باشد'
+            })
+
+    # متدهای کمکی برای نمایش
+    def get_flag_url(self):
+        """دریافت URL پرچم"""
+        if self.flag:
+            return self.flag.url
+        return None
+
+    def get_icon_url(self):
+        """دریافت URL آیکون"""
+        if self.icon:
+            return self.icon.url
+        return None
+
 
 class CountryChannelConfig(models.Model):
     """تنظیمات کانال‌ها برای هر کشور"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Country Channel Configuration"
+        verbose_name_plural = "Country Channel Configurations"
+        unique_together = ['country', 'channel']
+        ordering = ['country', 'priority']
+        db_table = "contract_country_channel_config"
+
     country = models.ForeignKey(Country, on_delete=models.CASCADE, verbose_name="Country")
     channel = models.ForeignKey(
         'telegram_manager.TelegramChannel',
@@ -166,43 +289,21 @@ class CountryChannelConfig(models.Model):
     )
 
     is_active = models.BooleanField(default=True, verbose_name="Active")
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        verbose_name = "Country Channel Configuration"
-        verbose_name_plural = "Country Channel Configurations"
-        unique_together = ['country', 'channel']
-        ordering = ['country', 'priority']
-        db_table = "contract_country_channel_config"
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.country} - {self.channel.name}"
 
 
-class Currency(models.Model):
-    """مدیریت ارزها و نرخ تبدیل"""
-    code = models.CharField(max_length=3, unique=True, verbose_name="Currency Code")  # USD, EUR, CNY
-    name = models.CharField(max_length=100, verbose_name="Currency Name")
-    exchange_rate_to_cny = models.DecimalField(
-        max_digits=10,
-        decimal_places=4,
-        verbose_name="Exchange Rate to CNY"
-    )
-    is_active = models.BooleanField(default=True, verbose_name="Active")
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        verbose_name = "Currency"
-        verbose_name_plural = "Currencies"
-        ordering = ['code']
-        table_db="currencies"
-
-    def __str__(self):
-        return f"{self.code} - {self.name}"
-
-
 class ActionType(models.Model):
     """انواع اکشن‌های ممکن"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Action Type"
+        verbose_name_plural = "Action Types"
+        db_table = "contract_action_type"
+
     ACTION_CHOICES = [
         ('review', 'Register Review'),
         ('rating_5', 'Register 5-Star Rating'),
@@ -216,34 +317,84 @@ class ActionType(models.Model):
     description = models.TextField(blank=True, verbose_name="Description")
     is_active = models.BooleanField(default=True, verbose_name="Active")
 
-    class Meta:
-        verbose_name = "Action Type"
-        verbose_name_plural = "Action Types"
-        table_db = "contract_action_type"
-
     def __str__(self):
         return self.get_name_display()
 
 
+class AdminProfile(models.Model):
+    """پروفایل ادمین"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Admin Profile"
+        verbose_name_plural = "Admin Profiles"
+        db_table = "contract_admin_profile"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="User Account",
+                                related_name="admin_profile")
+    role = models.CharField(max_length=50, choices=[
+        ('super_admin', 'Super Admin'),
+        ('admin', 'Admin'),
+        ('support', 'Support'),
+    ], default='admin')
+    permissions = models.JSONField(default=dict, blank=True, help_text="دسترسی‌های اضافی")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Admin: {self.user.username}"
+
+
+class Agent(models.Model):
+    """نمایندگان سایت"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Agent"
+        verbose_name_plural = "Agents"
+        db_table = "contract_agent"
+
+    AGENT_TYPES = [
+        ('internal', 'Internal Agent'),  # از تیم خودمان
+        ('external', 'External Agent'),  # از خارج
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="User Account", related_name="agent")
+    agent_type = models.CharField(max_length=10, choices=AGENT_TYPES, default='external')
+    company_name = models.CharField(max_length=255, verbose_name="Company/Agent Name")
+    contact_email = models.EmailField(verbose_name="Contact Email")
+    contact_phone = models.CharField(max_length=20, blank=True, verbose_name="Contact Phone")
+    assigned_sellers = models.ManyToManyField('Seller', blank=True, related_name="agents",
+                                              verbose_name="Assigned Sellers")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Agent: {self.company_name} ({self.get_agent_type_display()})"
+
+
 class Seller(models.Model):
     """فروشندگان/نمایندگان"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Seller"
+        verbose_name_plural = "Sellers"
+        db_table = "contract_seller"
+
     SELLER_TYPES = [
         ('seller', 'Seller'),
         ('agent', 'Agent'),
     ]
 
-    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="User Account")
+    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="User Account", related_name="seller")
     seller_type = models.CharField(max_length=10, choices=SELLER_TYPES, verbose_name="Seller Type")
     company_name = models.CharField(max_length=255, verbose_name="Company Name")
     contact_email = models.EmailField(verbose_name="Contact Email")
     contact_phone = models.CharField(max_length=20, blank=True, verbose_name="Contact Phone")
     is_verified = models.BooleanField(default=False, verbose_name="Verified")
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        verbose_name = "Seller"
-        verbose_name_plural = "Sellers"
-        table_db = "contract_seller"
+    assigned_agent = models.ForeignKey(Agent, on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name="managed_sellers", verbose_name="Assigned Agent")
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.company_name} ({self.get_seller_type_display()})"
@@ -251,6 +402,14 @@ class Seller(models.Model):
 
 class ContractTemplate(models.Model):
     """تمپلیت قرارداد برای هر سلر"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Contract Template"
+        verbose_name_plural = "Contract Templates"
+        unique_together = ['seller', 'action_type']
+        db_table = "contract_template"
+
     seller = models.ForeignKey(Seller, on_delete=models.CASCADE, verbose_name="Seller")
     action_type = models.ForeignKey(ActionType, on_delete=models.CASCADE, verbose_name="Action Type")
     refund_percentage = models.DecimalField(
@@ -271,22 +430,23 @@ class ContractTemplate(models.Model):
     )
     refund_description = models.TextField(verbose_name="Refund Description")
     is_active = models.BooleanField(default=True, verbose_name="Active")
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Contract Template"
-        verbose_name_plural = "Contract Templates"
-        unique_together = ['seller', 'action_type']
-        table_db = "contract_template"
 
     def __str__(self):
         return f"{self.seller} - {self.action_type}"
 
 
-# در contract_manager/models.py - آپدیت مدل Product
 class Product(models.Model):
     """مدیریت محصولات"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Product"
+        verbose_name_plural = "Products"
+        ordering = ['-created_at']
+        db_table = "contract_product"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     asin = models.CharField(max_length=10, unique=True, verbose_name="ASIN")
     variant_asins = models.TextField(
@@ -299,7 +459,7 @@ class Product(models.Model):
     search_guide = models.TextField(blank=True, verbose_name="Search Guide")
     product_url = models.URLField(verbose_name="Product URL")
 
-    # 🔥 تغییر از CharField به ForeignKey
+    # کشور محصول
     country = models.ForeignKey(
         Country,
         on_delete=models.CASCADE,
@@ -328,14 +488,8 @@ class Product(models.Model):
         verbose_name="Amazon Product Data"
     )
 
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Product"
-        verbose_name_plural = "Products"
-        ordering = ['-created_at']
-        db_table = "contract_product"
 
     def __str__(self):
         return f"{self.title} ({self.asin}) - {self.country.name}"
@@ -358,6 +512,50 @@ class Product(models.Model):
         """دریافت URL محصول در آمازون مربوطه"""
         return self.country.get_amazon_product_url(self.asin)
 
+    def create_or_update_telegram_message(self, channel, message_text: str, images: list = None):
+        """ایجاد یا بروزرسانی پیام تلگرام برای محصول در یک کانال"""
+        from .models import ProductChannel
+        product_channel, created = ProductChannel.objects.get_or_create(
+            product=self,
+            channel=channel,
+            defaults={
+                'telegram_message_text': message_text,
+                'telegram_images': images or [],
+                'status': 'draft',
+            }
+        )
+
+        if not created:
+            product_channel.telegram_message_text = message_text
+            product_channel.telegram_images = images or []
+            if product_channel.status == 'sent':
+                product_channel.status = 'edited'
+            product_channel.save()
+
+        return product_channel
+
+    def get_telegram_messages(self):
+        """دریافت تمام پیام‌های تلگرام محصول"""
+        from .models import ProductChannel
+        return ProductChannel.objects.filter(product=self)
+
+    def stop_all_messages(self):
+        """متوقف کردن همه پیام‌های محصول"""
+        messages = self.get_telegram_messages().filter(status='sent')
+        for msg in messages:
+            msg.mark_as_stopped()
+        self.is_stopped = True
+        self.save()
+
+    def resume_all_messages(self):
+        """ادامه دادن همه پیام‌های متوقف شده"""
+        messages = self.get_telegram_messages().filter(status='stopped')
+        for msg in messages:
+            msg.status = 'sent'
+            msg.save()
+        self.is_stopped = False
+        self.save()
+
     def save(self, *args, **kwargs):
         """اتوماتیک کراول کردن وقتی محصول جدید ایجاد میشه"""
         is_new = self._state.adding
@@ -376,7 +574,10 @@ class Product(models.Model):
             crawler_service = ProductCrawlerService()
 
             # استفاده از سرویس یکپارچه
-            amazon_product, message = crawler_service.crawl_amazon_product(self.asin)
+            amazon_product, message = crawler_service.crawl_amazon_product(
+                self.asin,
+                self.country.code
+            )
 
             if amazon_product:
                 self.amazon_product = amazon_product
@@ -390,6 +591,14 @@ class Product(models.Model):
 
 class ProductContract(models.Model):
     """قراردادهای اختصاصی برای هر محصول"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Product Contract"
+        verbose_name_plural = "Product Contracts"
+        unique_together = ['product', 'contract_template']
+        db_table = "contract_product_action_contract"
+
     product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="Product")
     contract_template = models.ForeignKey(ContractTemplate, on_delete=models.CASCADE, verbose_name="Contract Template")
     custom_refund_percentage = models.DecimalField(
@@ -407,13 +616,7 @@ class ProductContract(models.Model):
         verbose_name="Custom Commission Amount"
     )
     is_active = models.BooleanField(default=True, verbose_name="Active")
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        verbose_name = "Product Contract"
-        verbose_name_plural = "Product Contracts"
-        unique_together = ['product', 'contract_template']
-        table_db = "contract_product_action_contract"
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.product} - {self.contract_template}"
@@ -429,22 +632,140 @@ class ProductContract(models.Model):
             self.contract_template.commission_amount)
 
 
-
-
-class ProductTelegramMessage(models.Model):
-    """مدیریت پیام‌های تلگرام محصولات"""
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="Product")
-    telegram_message = models.ForeignKey(
-        'telegram_manager.TelegramMessage',
-        on_delete=models.CASCADE,
-        verbose_name="Telegram Message"
-    )
-    sent_at = models.DateTimeField(default=timezone.now)
+class ProductChannel(models.Model):
+    """مدیریت ارسال محصول به کانال‌های خاص"""
 
     class Meta:
-        verbose_name = "Product Telegram Message"
-        verbose_name_plural = "Product Telegram Messages"
-        table_db = "contract_product_telegram_message"
+        app_label = 'contract_manager'
+        verbose_name = "Product Channel"
+        verbose_name_plural = "Product Channels"
+        unique_together = ['product', 'channel']
+        ordering = ['-sent_at']
+        db_table = "contract_product_channel"
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('pending', 'Pending'),
+        ('sent', 'Sent'),
+        ('edited', 'Edited'),
+        ('deleted', 'Deleted'),
+        ('failed', 'Failed'),
+        ('stopped', 'Stopped'),
+    ]
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="Product")
+    channel = models.ForeignKey(
+        'telegram_manager.TelegramChannel',
+        on_delete=models.CASCADE,
+        verbose_name="Telegram Channel"
+    )
+
+    # اطلاعات پیام تلگرام
+    telegram_message_id = models.CharField(max_length=100, blank=True, null=True, verbose_name="Telegram Message ID")
+    telegram_message_text = models.TextField(verbose_name="Telegram Message Text")
+    telegram_images = models.JSONField(default=list, verbose_name="Telegram Images", help_text="لیست URL عکس‌ها")
+
+    # وضعیت و زمان‌بندی
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name="Status")
+    should_send = models.BooleanField(default=True, verbose_name="Should Send to Channel")
+    sent_at = models.DateTimeField(null=True, blank=True, verbose_name="Sent At")
+    edited_at = models.DateTimeField(null=True, blank=True, verbose_name="Edited At")
+    deleted_at = models.DateTimeField(null=True, blank=True, verbose_name="Deleted At")
+
+    # آمار و لاگ
+    view_count = models.IntegerField(default=0, verbose_name="View Count")
+    click_count = models.IntegerField(default=0, verbose_name="Click Count")
+    error_log = models.TextField(blank=True, verbose_name="Error Log")
+
+    # تنظیمات
+    auto_update = models.BooleanField(default=True, verbose_name="Auto Update Message")
+    notify_on_change = models.BooleanField(default=True, verbose_name="Notify on Product Change")
+
+    # زمان‌ها
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.product} - {self.telegram_message.telegram_message_id}"
+        return f"{self.product.asin} -> {self.channel.name} ({self.status})"
+
+    def is_sent(self):
+        return self.status == 'sent' and self.telegram_message_id is not None
+
+    def can_edit(self):
+        return self.is_sent() and self.status not in ['deleted', 'stopped']
+
+    def can_delete(self):
+        return self.is_sent() and self.status not in ['deleted']
+
+    def mark_as_sent(self, telegram_message_id: str):
+        self.status = 'sent'
+        self.telegram_message_id = telegram_message_id
+        self.sent_at = timezone.now()
+        self.save()
+
+    def mark_as_edited(self):
+        self.status = 'edited'
+        self.edited_at = timezone.now()
+        self.save()
+
+    def mark_as_deleted(self):
+        self.status = 'deleted'
+        self.deleted_at = timezone.now()
+        self.save()
+
+    def mark_as_stopped(self):
+        self.status = 'stopped'
+        self.save()
+
+    def update_statistics(self, views=None, clicks=None):
+        if views is not None:
+            self.view_count = views
+        if clicks is not None:
+            self.click_count = clicks
+        self.save()
+
+    def get_message_data(self):
+        """دریافت داده‌های پیام برای ارسال"""
+        return {
+            'message_text': self.telegram_message_text,
+            'images': self.telegram_images,
+            'product_asin': self.product.asin,
+            'product_title': self.product.title,
+            'country_code': self.product.country.code,
+        }
+
+
+class ProductUpdateLog(models.Model):
+    """لاگ تغییرات محصول"""
+
+    class Meta:
+        app_label = 'contract_manager'
+        verbose_name = "Product Update Log"
+        verbose_name_plural = "Product Update Logs"
+        ordering = ['-created_at']
+        db_table = "contract_product_update_log"
+
+    UPDATE_TYPES = [
+        ('price_change', 'Price Change'),
+        ('stock_change', 'Stock Change'),
+        ('info_update', 'Information Update'),
+        ('status_change', 'Status Change'),
+        ('telegram_update', 'Telegram Message Update'),
+        ('channel_update', 'Channel Status Update'),
+    ]
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="Product")
+    update_type = models.CharField(max_length=50, choices=UPDATE_TYPES, verbose_name="Update Type")
+    old_data = models.JSONField(default=dict, verbose_name="Old Data")
+    new_data = models.JSONField(default=dict, verbose_name="New Data")
+    description = models.TextField(blank=True, verbose_name="Description")
+
+    # تاثیر بر کانال‌ها
+    affected_channels = models.JSONField(default=list, verbose_name="Affected Channels")
+    telegram_updates_sent = models.BooleanField(default=False, verbose_name="Telegram Updates Sent")
+
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Created By")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.product.asin} - {self.get_update_type_display()} at {self.created_at}"

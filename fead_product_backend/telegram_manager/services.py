@@ -186,6 +186,81 @@ class TelegramBotService:
             logger.error(f"Error getting bot info: {e}")
             return None
 
+    def set_webhook(self, webhook_url, secret_token=None):
+        """تنظیم Webhook"""
+        try:
+            url = f"{self.base_url}/setWebhook"
+            payload = {
+                'url': webhook_url
+            }
+
+            if secret_token:
+                payload['secret_token'] = secret_token
+
+            response = requests.post(url, json=payload)
+            data = response.json()
+
+            return data.get('ok', False), data.get('description', '')
+
+        except Exception as e:
+            logger.error(f"Error setting webhook: {e}")
+            return False, str(e)
+
+    def get_webhook_info(self):
+        """دریافت اطلاعات Webhook فعلی"""
+        try:
+            url = f"{self.base_url}/getWebhookInfo"
+            response = requests.get(url)
+            data = response.json()
+
+            if data.get('ok'):
+                return data['result']
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"Error getting webhook info: {e}")
+            return None
+
+    def send_message_with_buttons(self, channel_id, message_text, buttons):
+        """ارسال پیام با دکمه‌های inline"""
+        try:
+            url = f"{self.base_url}/sendMessage"
+
+            # ساخت inline keyboard
+            keyboard = []
+            for row in buttons:
+                keyboard_row = []
+                for btn in row:
+                    keyboard_row.append({
+                        'text': btn['text'],
+                        'callback_data': btn.get('callback_data', ''),
+                        'url': btn.get('url')
+                    })
+                keyboard.append(keyboard_row)
+
+            payload = {
+                'chat_id': channel_id,
+                'text': message_text,
+                'parse_mode': 'HTML',
+                'reply_markup': {
+                    'inline_keyboard': keyboard
+                }
+            }
+
+            response = requests.post(url, json=payload)
+            data = response.json()
+
+            if data.get('ok'):
+                message_id = data['result']['message_id']
+                return True, message_id, ""
+            else:
+                error_msg = data.get('description', 'Unknown error')
+                return False, None, str(error_msg)
+
+        except Exception as e:
+            logger.error(f"Error sending message with buttons: {e}")
+            return False, None, str(e)
+
 
 def get_bot_service():
     """Helper function to get TelegramBotService instance"""

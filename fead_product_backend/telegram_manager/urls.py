@@ -1,4 +1,4 @@
-# telegram_manager/urls.py
+# telegram_manager/urls.py (HTML - برای ادمین - فعلی)
 from django.urls import path
 from . import views
 

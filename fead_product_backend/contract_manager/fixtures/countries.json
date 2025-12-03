@@ -1,0 +1,173 @@
+[
+  {
+    "model": "contract_manager.country",
+    "pk": "US",
+    "fields": {
+      "name": "United States",
+      "native_name": "United States",
+      "amazon_domain": "amazon.com",
+      "amazon_url": "https://www.amazon.com",
+      "language": "en",
+      "timezone": "America/New_York",
+      "default_zip_code": "10001",
+      "default_city": "New York",
+      "default_state": "NY",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 1
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "UK",
+    "fields": {
+      "name": "United Kingdom",
+      "native_name": "United Kingdom",
+      "amazon_domain": "amazon.co.uk",
+      "amazon_url": "https://www.amazon.co.uk",
+      "language": "en",
+      "timezone": "Europe/London",
+      "default_zip_code": "EC1A 1BB",
+      "default_city": "London",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 2
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "DE",
+    "fields": {
+      "name": "Germany",
+      "native_name": "Deutschland",
+      "amazon_domain": "amazon.de",
+      "amazon_url": "https://www.amazon.de",
+      "language": "de",
+      "timezone": "Europe/Berlin",
+      "default_zip_code": "10115",
+      "default_city": "Berlin",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 3
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "FR",
+    "fields": {
+      "name": "France",
+      "native_name": "France",
+      "amazon_domain": "amazon.fr",
+      "amazon_url": "https://www.amazon.fr",
+      "language": "fr",
+      "timezone": "Europe/Paris",
+      "default_zip_code": "75001",
+      "default_city": "Paris",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 4
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "IT",
+    "fields": {
+      "name": "Italy",
+      "native_name": "Italia",
+      "amazon_domain": "amazon.it",
+      "amazon_url": "https://www.amazon.it",
+      "language": "it",
+      "timezone": "Europe/Rome",
+      "default_zip_code": "00100",
+      "default_city": "Rome",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 5
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "ES",
+    "fields": {
+      "name": "Spain",
+      "native_name": "España",
+      "amazon_domain": "amazon.es",
+      "amazon_url": "https://www.amazon.es",
+      "language": "es",
+      "timezone": "Europe/Madrid",
+      "default_zip_code": "28001",
+      "default_city": "Madrid",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 6
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "CA",
+    "fields": {
+      "name": "Canada",
+      "native_name": "Canada",
+      "amazon_domain": "amazon.ca",
+      "amazon_url": "https://www.amazon.ca",
+      "language": "en",
+      "timezone": "America/Toronto",
+      "default_zip_code": "M5H 2N2",
+      "default_city": "Toronto",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 7
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "JP",
+    "fields": {
+      "name": "Japan",
+      "native_name": "日本",
+      "amazon_domain": "amazon.co.jp",
+      "amazon_url": "https://www.amazon.co.jp",
+      "language": "ja",
+      "timezone": "Asia/Tokyo",
+      "default_zip_code": "100-0001",
+      "default_city": "Tokyo",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 8
+    }
+  },
+  {
+    "model": "contract_manager.country",
+    "pk": "AU",
+    "fields": {
+      "name": "Australia",
+      "native_name": "Australia",
+      "amazon_domain": "amazon.com.au",
+      "amazon_url": "https://www.amazon.com.au",
+      "language": "en",
+      "timezone": "Australia/Sydney",
+      "default_zip_code": "2000",
+      "default_city": "Sydney",
+      "default_state": "",
+      "is_active": true,
+      "is_available_for_products": true,
+      "is_available_for_crawling": true,
+      "display_order": 9
+    }
+  }
+]

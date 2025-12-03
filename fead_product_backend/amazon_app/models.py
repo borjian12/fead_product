@@ -38,14 +38,16 @@ class AmazonProduct(models.Model):
     specifications = models.JSONField(default=dict, blank=True, verbose_name="Specifications")
     rating = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True, verbose_name="Rating")
     review_count = models.IntegerField(default=0, verbose_name="Review Count")
-    variants = models.JSONField(
-        default=list,
-        blank=True,
-        verbose_name="Variants",
-        help_text="Variant ASINs and their data in JSON format"
-    )
+    variants = models.JSONField(default=list, blank=True, verbose_name="Variants")
     domain = models.CharField(max_length=50, default="amazon.com", verbose_name="Amazon Domain")
     geo_location = models.JSONField(default=dict, blank=True, verbose_name="Geo Location")
+
+    # 🔥 اضافه کردن فیلدهای فروشنده
+    seller = models.CharField(max_length=200, blank=True, verbose_name="Seller")
+    seller_id = models.CharField(max_length=50, blank=True, verbose_name="Seller ID")
+    seller_type = models.CharField(max_length=50, blank=True, verbose_name="Seller Type")
+    seller_info = models.JSONField(default=dict, blank=True, verbose_name="Seller Information")
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
     last_crawled = models.DateTimeField(null=True, blank=True, verbose_name="Last Crawled")
@@ -59,17 +61,16 @@ class AmazonProduct(models.Model):
             models.Index(fields=['brand']),
             models.Index(fields=['category']),
             models.Index(fields=['rating']),
+            models.Index(fields=['seller']),  # 🔥 اضافه کردن ایندکس برای فروشنده
         ]
         ordering = ['-created_at']
-        unique_together = ['asin', 'country_code']  # 🔥 هر ASIN در هر کشور یکتا است
+        unique_together = ['asin', 'country_code']
 
     def __str__(self):
         return f"{self.asin} - {self.get_country_code_display()} - {self.title[:50]}"
 
     def get_amazon_url(self):
-        """دریافت URL محصول در آمازون مربوطه"""
         return f"https://www.{self.domain}/dp/{self.asin}"
-
 
 class AmazonProductPrice(models.Model):
     CURRENCY_CHOICES = [
@@ -119,7 +120,6 @@ class AmazonProductPrice(models.Model):
 
     def __str__(self):
         return f"{self.product.asin} - {self.country_code} - ${self.price} - {self.crawl_timestamp.strftime('%Y-%m-%d %H:%M')}"
-
 
 class AmazonCrawlSession(models.Model):
     STATUS_CHOICES = [

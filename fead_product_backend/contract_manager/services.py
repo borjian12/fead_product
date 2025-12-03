@@ -1,27 +1,26 @@
 # contract_manager/services.py
-from typing import List
-
+from typing import List, Tuple, Optional, Dict
 from django.utils import timezone
-from django.db.models import Max
+from django.db.models import Max, Q
 from telegram_manager.services import TelegramBotService
-from telegram_manager.models import TelegramMessage
-from .models import Product, ProductContract, CountryChannelConfig, Country
+from telegram_manager.models import TelegramMessage, TelegramChannel
+from .models import Product, ProductContract, CountryChannelConfig, Country, ProductChannel
 from amazon_app.amazon_crawler import AmazonCrawlerService
 from amazon_app.models import AmazonProduct
+import json
 
 
 class ProductCrawlerService:
     def __init__(self):
         self.amazon_crawler = AmazonCrawlerService()
 
-    def crawl_amazon_product(self, asin: str, country_code: str = "US") -> tuple:
+    def crawl_amazon_product(self, asin: str, country_code: str = "US") -> Tuple[Optional[AmazonProduct], str]:
         """کراول کردن محصول از آمازون با تنظیمات کشور خاص"""
         try:
             # ۱. پیدا کردن کشور
             country = Country.objects.get(code=country_code, is_active=True)
 
             # ۲. چک کردن وجود محصول در دیتابیس
-            from amazon_app.models import AmazonProduct
             try:
                 amazon_product = AmazonProduct.objects.get(asin=asin, country=country)
                 return amazon_product, "Product already exists in database"
@@ -32,7 +31,7 @@ class ProductCrawlerService:
             print(f"🕷️ Crawling Amazon product: {asin} from {country.name}")
 
             # استفاده از کراولر جدید با پشتیبانی کشور
-            crawled_data = self.amazon_crawler.crawl_product(
+            crawled_data = self.amazon_crawler.crawl_single_product(
                 product_identifier=asin,
                 country_code=country_code
             )
@@ -42,7 +41,7 @@ class ProductCrawlerService:
 
             # ۴. ذخیره در AmazonProduct با اطلاعات کشور
             amazon_product = AmazonProduct.objects.create(
-                asin=crawled_data['asin'],
+                asin=crawled_data.get('asin', asin),
                 title=crawled_data.get('title', ''),
                 price=crawled_data.get('price'),
                 currency=crawled_data.get('currency', 'USD'),
@@ -59,10 +58,6 @@ class ProductCrawlerService:
                 geo_location=crawled_data.get('geo_location', {})
             )
 
-            # ۵. ذخیره variantها اگر وجود دارند
-            if crawled_data.get('variants'):
-                self._save_product_variants(amazon_product, crawled_data['variants'])
-
             return amazon_product, f"Product crawled successfully from {country.amazon_domain}"
 
         except Country.DoesNotExist:
@@ -70,11 +65,10 @@ class ProductCrawlerService:
         except Exception as e:
             return None, f"Error crawling product: {str(e)}"
 
-    def crawl_and_create_product(self, asin: str, country_code: str, owner, **product_data) -> tuple:
+    def crawl_and_create_product(self, asin: str, country_code: str, owner, **product_data) -> Tuple[
+        Optional[Product], str]:
         """کراول کردن محصول و ایجاد رکورد کامل در Contract Manager با پشتیبانی کشور"""
         try:
-            from .models import Product
-
             # ۱. پیدا کردن کشور
             country = Country.objects.get(code=country_code, is_active=True)
 
@@ -95,13 +89,8 @@ class ProductCrawlerService:
                 daily_max_quantity=product_data.get('daily_max_quantity', 10),
                 total_max_quantity=product_data.get('total_max_quantity', 100),
                 search_guide=product_data.get('search_guide', ''),
+                variant_asins=product_data.get('variant_asins', '')
             )
-
-            # ۴. استخراج و ذخیره variant ASIN ها
-            if amazon_product.variants:
-                variant_asins = [v.get('asin') for v in amazon_product.variants if v.get('asin')]
-                product.variant_asins = ','.join(variant_asins)
-                product.save()
 
             return product, f"Product created successfully for {country.name}"
 
@@ -110,7 +99,7 @@ class ProductCrawlerService:
         except Exception as e:
             return None, f"Error creating product: {str(e)}"
 
-    def refresh_product_data(self, product: Product) -> tuple:
+    def refresh_product_data(self, product: Product) -> Tuple[bool, str]:
         """بروزرسانی داده‌های محصول از آمازون با تنظیمات کشور"""
         try:
             print(f"🔄 Refreshing Amazon data for product: {product.asin} from {product.country.name}")
@@ -124,19 +113,67 @@ class ProductCrawlerService:
             if amazon_product:
                 # آپدیت محصول
                 product.amazon_product = amazon_product
-
-                # آپدیت variantها
-                if amazon_product.variants:
-                    variant_asins = [v.get('asin') for v in amazon_product.variants if v.get('asin')]
-                    product.variant_asins = ','.join(variant_asins)
-
+                product.title = amazon_product.title or product.title
                 product.save()
+
                 return True, f"Product data refreshed successfully from {product.country.amazon_domain}"
             else:
                 return False, message
 
         except Exception as e:
             return False, f"Error refreshing product: {str(e)}"
+
+    def crawl_by_url(self, url: str, owner, **product_data) -> Tuple[Optional[Product], str]:
+        """کراول کردن محصول با URL و ایجاد در Contract Manager"""
+        try:
+            # استفاده از سرویس کراولینگ آمازون
+            crawled_data = self.amazon_crawler.crawl_product_by_url(url)
+
+            if not crawled_data:
+                return None, "Failed to crawl product from URL"
+
+            asin = crawled_data.get('asin')
+            if not asin:
+                return None, "Could not extract ASIN from URL"
+
+            # تشخیص کشور از دامنه
+            country_code = self._detect_country_from_url(url)
+
+            # کراول و ایجاد محصول
+            return self.crawl_and_create_product(
+                asin=asin,
+                country_code=country_code,
+                owner=owner,
+                **product_data
+            )
+
+        except Exception as e:
+            return None, f"Error crawling product by URL: {str(e)}"
+
+    def _detect_country_from_url(self, url: str) -> str:
+        """تشخیص کشور از URL محصول آمازون"""
+        country_map = {
+            'amazon.com': 'US',
+            'amazon.co.uk': 'UK',
+            'amazon.de': 'DE',
+            'amazon.fr': 'FR',
+            'amazon.it': 'IT',
+            'amazon.es': 'ES',
+            'amazon.ae': 'AE',
+            'amazon.sa': 'SA',
+            'amazon.com.tr': 'TR',
+            'amazon.cn': 'CN',
+            'amazon.co.jp': 'JP',
+            'amazon.in': 'IN',
+            'amazon.com.au': 'AU',
+            'amazon.ca': 'CA',
+            'amazon.com.br': 'BR',
+        }
+
+        for domain, code in country_map.items():
+            if domain in url:
+                return code
+        return 'US'
 
     def crawl_multiple_products(self, products_data: List[dict]) -> dict:
         """کراول کردن چندین محصول با کشورهای مختلف"""
@@ -149,20 +186,24 @@ class ProductCrawlerService:
             asin = product_data.get('asin')
             country_code = product_data.get('country_code', 'US')
             owner = product_data.get('owner')
+            url = product_data.get('url')
 
             try:
-                product, message = self.crawl_and_create_product(
-                    asin=asin,
-                    country_code=country_code,
-                    owner=owner,
-                    **product_data
-                )
+                if url:
+                    product, message = self.crawl_by_url(url, owner, **product_data)
+                else:
+                    product, message = self.crawl_and_create_product(
+                        asin=asin,
+                        country_code=country_code,
+                        owner=owner,
+                        **product_data
+                    )
 
                 if product:
                     results['successful'].append({
                         'asin': asin,
                         'country': country_code,
-                        'product_id': product.id,
+                        'product_id': str(product.id),
                         'message': message
                     })
                 else:
@@ -251,6 +292,18 @@ class ProductMessageService:
 
         return "\n".join(message_parts)
 
+    def _create_custom_template_message(self, product: Product, template: str) -> str:
+        """ایجاد پیام با قالب سفارشی"""
+        context = self._get_message_context(product)
+
+        # جایگزینی متغیرها در قالب
+        message = template
+        for key, value in context.items():
+            placeholder = f"{{{{{key}}}}}"
+            message = message.replace(placeholder, str(value))
+
+        return message
+
     def _get_message_context(self, product: Product) -> dict:
         """دریافت context برای قالب‌بندی با اطلاعات کشور"""
         best_refund = self._calculate_best_refund(product)
@@ -273,62 +326,262 @@ class ProductMessageService:
             'search_guide': product.search_guide or 'No search guide provided',
             'amazon_url': product.get_amazon_url(),
             'product_description': product.description or 'No description available',
+            'flag_emoji': self._get_country_flag_emoji(product.country.code),
+            'currency_symbol': self._get_currency_symbol(
+                product.amazon_product.currency if product.amazon_product else 'USD'),
         }
 
-    def send_product_to_telegram(self, product: Product, channel_config=None) -> tuple:
-        """ارسال محصول به تلگرام با اطلاعات کشور"""
-        try:
-            if channel_config:
-                channel = channel_config.channel
-            else:
-                channel = product.get_primary_channel()
+    def prepare_product_for_channels(self, product: Product, channel_ids: List[str] = None) -> List[ProductChannel]:
+        """آماده‌سازی محصول برای ارسال به کانال‌ها"""
+        prepared_messages = []
 
-            if not channel:
-                return False, "No active channel found for product country"
+        # اگر channel_ids مشخص شده، فقط آن کانال‌ها
+        if channel_ids:
+            channels = TelegramChannel.objects.filter(
+                id__in=channel_ids,
+                is_active=True
+            )
+        else:
+            # همه کانال‌های مرتبط با کشور
+            channels = product.get_related_channels()
 
-            message_text = self.create_product_message_text(product, channel_config)
-            images = self._get_product_images(product)
+        for channel in channels:
+            # بررسی تنظیمات کانال
+            try:
+                channel_config = CountryChannelConfig.objects.get(
+                    country=product.country,
+                    channel=channel,
+                    is_active=True
+                )
+                if not channel_config.auto_send_new_products:
+                    continue
+            except CountryChannelConfig.DoesNotExist:
+                pass  # ارسال شود
 
-            print(f"📤 Sending product {product.asin} from {product.country.name} to channel {channel.name}")
+            # ایجاد متن پیام
+            message_text = self.create_product_message_text(product)
 
-            # ارسال پیام
-            success, telegram_message_id, error = self.telegram_service.send_message(
-                channel.channel_id,
-                message_text,
-                images
+            # ایجاد ProductChannel
+            product_channel = product.create_or_update_telegram_message(
+                channel=channel,
+                message_text=message_text,
+                images=self._get_product_images(product)
             )
 
-            if success:
-                # ذخیره پیام در دیتابیس
-                telegram_message = TelegramMessage.objects.create(
-                    channel=channel,
-                    message_text=message_text,
-                    images=images,
-                    telegram_message_id=telegram_message_id,
-                    status='sent',
-                    sent_at=timezone.now(),
-                    created_by=product.owner.user
+            if product_channel:
+                prepared_messages.append(product_channel)
+
+        return prepared_messages
+
+    def send_product_to_channels(self, product: Product, channel_ids: List[str] = None) -> Dict:
+        """ارسال محصول به کانال‌های تلگرام"""
+        results = {
+            'successful': [],
+            'failed': [],
+            'total': 0
+        }
+
+        # آماده‌سازی پیام‌ها
+        product_channels = self.prepare_product_for_channels(product, channel_ids)
+        results['total'] = len(product_channels)
+
+        for product_channel in product_channels:
+            try:
+                # ارسال به تلگرام
+                success, telegram_message_id, error = self.telegram_service.send_message(
+                    product_channel.channel.channel_id,
+                    product_channel.telegram_message_text,
+                    product_channel.telegram_images
                 )
 
-                # ایجاد ارتباط با محصول
-                from .models import ProductTelegramMessage
-                ProductTelegramMessage.objects.create(
-                    product=product,
-                    telegram_message=telegram_message
+                if success:
+                    product_channel.mark_as_sent(telegram_message_id)
+
+                    # ذخیره در TelegramMessage برای سازگاری
+                    telegram_message = TelegramMessage.objects.create(
+                        channel=product_channel.channel,
+                        message_text=product_channel.telegram_message_text,
+                        images=product_channel.telegram_images,
+                        telegram_message_id=telegram_message_id,
+                        status='sent',
+                        sent_at=timezone.now(),
+                        created_by=product.owner.user
+                    )
+
+                    results['successful'].append({
+                        'channel': product_channel.channel.name,
+                        'message_id': telegram_message_id,
+                        'product_channel_id': product_channel.id
+                    })
+                else:
+                    product_channel.status = 'failed'
+                    product_channel.error_log = error
+                    product_channel.save()
+
+                    results['failed'].append({
+                        'channel': product_channel.channel.name,
+                        'error': error,
+                        'product_channel_id': product_channel.id
+                    })
+
+            except Exception as e:
+                error_msg = f"Unexpected error: {str(e)}"
+                product_channel.status = 'failed'
+                product_channel.error_log = error_msg
+                product_channel.save()
+
+                results['failed'].append({
+                    'channel': product_channel.channel.name,
+                    'error': error_msg,
+                    'product_channel_id': product_channel.id
+                })
+
+        return results
+
+    def update_telegram_messages(self, product: Product) -> Dict:
+        """بروزرسانی پیام‌های تلگرام ارسال شده برای محصول"""
+        results = {
+            'updated': [],
+            'failed': [],
+            'total': 0
+        }
+
+        # پیام‌های ارسال شده
+        product_channels = ProductChannel.objects.filter(
+            product=product,
+            status='sent',
+            auto_update=True
+        )
+
+        results['total'] = product_channels.count()
+
+        for product_channel in product_channels:
+            try:
+                # ایجاد متن جدید
+                new_message_text = self.create_product_message_text(product)
+
+                # ویرایش پیام در تلگرام
+                success, error = self.telegram_service.edit_message(
+                    product_channel.channel.channel_id,
+                    product_channel.telegram_message_id,
+                    new_message_text
                 )
 
-                print(f"✅ Product {product.asin} from {product.country.name} sent successfully to Telegram")
-                return True, telegram_message_id
-            else:
-                print(f"❌ Failed to send product {product.asin}: {error}")
-                return False, error
+                if success:
+                    product_channel.telegram_message_text = new_message_text
+                    product_channel.mark_as_edited()
 
-        except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
-            print(f"❌ Error in send_product_to_telegram: {error_msg}")
-            return False, error_msg
+                    # بروزرسانی TelegramMessage مرتبط
+                    try:
+                        telegram_message = TelegramMessage.objects.get(
+                            telegram_message_id=product_channel.telegram_message_id
+                        )
+                        telegram_message.message_text = new_message_text
+                        telegram_message.status = 'edited'
+                        telegram_message.save()
+                    except TelegramMessage.DoesNotExist:
+                        pass
 
-    # سایر متدهای کمکی...
+                    results['updated'].append({
+                        'channel': product_channel.channel.name,
+                        'message_id': product_channel.telegram_message_id
+                    })
+                else:
+                    results['failed'].append({
+                        'channel': product_channel.channel.name,
+                        'error': error
+                    })
+
+            except Exception as e:
+                results['failed'].append({
+                    'channel': product_channel.channel.name,
+                    'error': str(e)
+                })
+
+        return results
+
+    def stop_telegram_messages(self, product: Product) -> Dict:
+        """متوقف کردن پیام‌های تلگرام محصول"""
+        results = {
+            'stopped': [],
+            'failed': [],
+            'total': 0
+        }
+
+        # پیام‌های ارسال شده
+        product_channels = ProductChannel.objects.filter(
+            product=product,
+            status='sent'
+        )
+
+        results['total'] = product_channels.count()
+
+        for product_channel in product_channels:
+            try:
+                # حذف پیام از تلگرام
+                success, error = self.telegram_service.delete_message(
+                    product_channel.channel.channel_id,
+                    product_channel.telegram_message_id
+                )
+
+                if success:
+                    product_channel.mark_as_stopped()
+                    results['stopped'].append({
+                        'channel': product_channel.channel.name,
+                        'message_id': product_channel.telegram_message_id
+                    })
+                else:
+                    results['failed'].append({
+                        'channel': product_channel.channel.name,
+                        'error': error
+                    })
+
+            except Exception as e:
+                results['failed'].append({
+                    'channel': product_channel.channel.name,
+                    'error': str(e)
+                })
+
+        return results
+
+    def delete_telegram_messages(self, product: Product) -> Dict:
+        """حذف پیام‌های تلگرام محصول"""
+        results = {
+            'deleted': [],
+            'failed': [],
+            'total': 0
+        }
+
+        # همه پیام‌های محصول
+        product_channels = ProductChannel.objects.filter(product=product)
+
+        results['total'] = product_channels.count()
+
+        for product_channel in product_channels:
+            try:
+                # حذف از تلگرام اگر ارسال شده
+                if product_channel.telegram_message_id:
+                    self.telegram_service.delete_message(
+                        product_channel.channel.channel_id,
+                        product_channel.telegram_message_id
+                    )
+
+                # حذف از دیتابیس
+                product_channel.mark_as_deleted()
+                results['deleted'].append({
+                    'channel': product_channel.channel.name,
+                    'message_id': product_channel.telegram_message_id
+                })
+
+            except Exception as e:
+                results['failed'].append({
+                    'channel': product_channel.channel.name,
+                    'error': str(e)
+                })
+
+        return results
+
+    # متدهای کمکی
     def _calculate_best_refund(self, product: Product) -> float:
         """محاسبه بهترین درصد ریفاند"""
         try:
@@ -393,7 +646,8 @@ class ProductMessageService:
         """دریافت نماد ارز"""
         symbols = {
             'USD': '$', 'EUR': '€', 'GBP': '£', 'CNY': '¥',
-            'JPY': '¥', 'INR': '₹', 'CAD': 'C$', 'AUD': 'A$'
+            'JPY': '¥', 'INR': '₹', 'CAD': 'C$', 'AUD': 'A$',
+            'AED': 'د.إ', 'SAR': 'ر.س', 'TRY': '₺', 'BRL': 'R$'
         }
         return symbols.get(currency_code, '$')
 

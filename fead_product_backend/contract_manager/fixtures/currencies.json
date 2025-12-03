@@ -1,0 +1,167 @@
+[
+  {
+    "model": "contract_manager.currency",
+    "pk": "CNY",
+    "fields": {
+      "name": "Chinese Yuan",
+      "exchange_rate_to_cny": "1.0000",
+      "symbol": "¥",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "USD",
+    "fields": {
+      "name": "US Dollar",
+      "exchange_rate_to_cny": "7.2800",
+      "symbol": "$",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "EUR",
+    "fields": {
+      "name": "Euro",
+      "exchange_rate_to_cny": "7.9500",
+      "symbol": "€",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "GBP",
+    "fields": {
+      "name": "British Pound",
+      "exchange_rate_to_cny": "9.3500",
+      "symbol": "£",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "HKD",
+    "fields": {
+      "name": "Hong Kong Dollar",
+      "exchange_rate_to_cny": "0.9300",
+      "symbol": "HK$",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "JPY",
+    "fields": {
+      "name": "Japanese Yen",
+      "exchange_rate_to_cny": "0.0520",
+      "symbol": "¥",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "AED",
+    "fields": {
+      "name": "UAE Dirham",
+      "exchange_rate_to_cny": "1.9800",
+      "symbol": "د.إ",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "SAR",
+    "fields": {
+      "name": "Saudi Riyal",
+      "exchange_rate_to_cny": "1.9400",
+      "symbol": "﷼",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "TRY",
+    "fields": {
+      "name": "Turkish Lira",
+      "exchange_rate_to_cny": "0.2200",
+      "symbol": "₺",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "INR",
+    "fields": {
+      "name": "Indian Rupee",
+      "exchange_rate_to_cny": "0.0870",
+      "symbol": "₹",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "THB",
+    "fields": {
+      "name": "Thai Baht",
+      "exchange_rate_to_cny": "0.2000",
+      "symbol": "฿",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "KRW",
+    "fields": {
+      "name": "South Korean Won",
+      "exchange_rate_to_cny": "0.0053",
+      "symbol": "₩",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "AUD",
+    "fields": {
+      "name": "Australian Dollar",
+      "exchange_rate_to_cny": "4.7500",
+      "symbol": "A$",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "RUB",
+    "fields": {
+      "name": "Russian Ruble",
+      "exchange_rate_to_cny": "0.0820",
+      "symbol": "₽",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "contract_manager.currency",
+    "pk": "IRR",
+    "fields": {
+      "name": "Iranian Rial",
+      "exchange_rate_to_cny": "0.00017",
+      "symbol": "﷼",
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  }
+]

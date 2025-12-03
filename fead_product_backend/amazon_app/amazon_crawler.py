@@ -3,51 +3,171 @@ import logging
 import uuid
 import time
 import random
-from datetime import datetime
+from urllib.parse import urlparse, parse_qs
+
 from django.utils import timezone
 from django.db import transaction
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium_app.driver_manager import SeleniumDriverManager
+from .amazon_driver_manager import AmazonDriverManager  # 🔥 تغییر اینجا
+from .geo_manager import AmazonGeoManager
+from .amazon_parser import AmazonProductParser
+from contract_manager.models import Country
 from .models import AmazonProduct, AmazonProductPrice, AmazonCrawlSession
-from .amazon_parser import AmazonPageParser
 
 logger = logging.getLogger(__name__)
 
 
 class AmazonCrawlerService:
     def __init__(self):
-        self.driver_manager = SeleniumDriverManager()
+        self.driver_manager = AmazonDriverManager()  # 🔥 تغییر اینجا
+        self.geo_manager = AmazonGeoManager(self.driver_manager)
 
-    def get_amazon_driver(self, driver_name="amazon_crawler"):
-        """دریافت درایور مخصوص Amazon"""
-        profile_data = {
-            'headless': False,  # مهم: برای دیدن در VNC
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'window_size': '1920,1080',
-        }
+    def crawl_product_by_url(self, product_url):
+        """کراول کردن محصول با URL"""
+        try:
+            logger.info(f"🎯 STARTING CRAWL FOR URL: {product_url}")
 
-        return self.driver_manager.get_or_create_driver(
-            driver_name,
-            driver_type='CHROME',
-            profile_data=profile_data
-        )
+            # استخراج کشور از URL
+            country_code = self.extract_country_from_url(product_url)
+            logger.info(f"📍 COUNTRY DETECTED: {country_code}")
 
-    def crawl_products(self, asins, driver_name="amazon_crawler", session_id=None):
-        """Crawl کردن محصولات"""
+            # دریافت کشور از دیتابیس
+            try:
+                country = Country.objects.get(code=country_code, is_active=True, is_available_for_crawling=True)
+                logger.info(f"✅ COUNTRY FOUND IN DB: {country.name}")
+            except Country.DoesNotExist:
+                logger.error(f"❌ Country not available: {country_code}")
+                return None
+
+            # دریافت درایور مخصوص کشور - 🔥 حالا این متد وجود دارد
+            driver = self.driver_manager.get_amazon_driver(country_code)
+            logger.info(f"🚗 Amazon driver obtained for: {country_code}")
+
+            # تنظیم موقعیت
+            logger.info(f"🌍 CONFIGURING AMAZON LOCATION FOR {country.name}")
+            self.geo_manager.configure_location(driver, country)
+
+            # ایجاد پارسر
+            parser = AmazonProductParser(self.driver_manager, driver, country)
+
+            # کراول کردن
+            product_data = parser.crawl_product_by_url(product_url)
+
+            if product_data:
+                # ذخیره در دیتابیس
+                saved_data = self._save_product_data(product_data, country)
+                logger.info(f"✅ Successfully crawled product from URL: {product_url}")
+                return saved_data
+
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Error crawling product by URL: {e}")
+            return None
+
+    def extract_country_from_url(self, url):
+        """استخراج کشور از URL"""
+        try:
+            from urllib.parse import urlparse
+
+            domain = urlparse(url).netloc.lower()
+
+            country_map = {
+                'amazon.com': 'US',
+                'amazon.co.uk': 'UK',
+                'amazon.de': 'DE',
+                'amazon.fr': 'FR',
+                'amazon.it': 'IT',
+                'amazon.es': 'ES',
+                'amazon.ca': 'CA',
+                'amazon.co.jp': 'JP',
+                'amazon.com.au': 'AU',
+            }
+
+            for domain_part, country_code in country_map.items():
+                if domain_part in domain:
+                    return country_code
+            return 'US'
+        except:
+            return 'US'
+
+    def _save_product_data(self, product_data, country):
+        """ذخیره داده‌های محصول"""
+        try:
+            with transaction.atomic():
+                # ایجاد یا آپدیت محصول
+                product, created = AmazonProduct.objects.update_or_create(
+                    asin=product_data['asin'],
+                    country_code=country.code,
+                    defaults={
+                        'title': product_data.get('title', ''),
+                        'description': product_data.get('description', ''),
+                        'brand': product_data.get('brand', ''),
+                        'category': product_data.get('category', ''),
+                        'image_url': product_data.get('image_url', ''),
+                        'product_url': country.get_amazon_product_url(product_data['asin']),
+                        'condition': product_data.get('condition', 'NEW'),
+                        'features': product_data.get('features', []),
+                        'specifications': product_data.get('specifications', {}),
+                        'rating': product_data.get('rating'),
+                        'review_count': product_data.get('review_count', 0),
+                        'domain': country.amazon_domain,
+                        'seller': product_data.get('seller', ''),
+                        'seller_info': {
+                            'last_crawled': timezone.now().isoformat(),
+                            'seller_id': product_data.get('seller_id', ''),
+                            'seller_type': product_data.get('seller_type', '')
+                        },
+                        'last_crawled': timezone.now(),
+                        'is_active': True
+                    }
+                )
+
+                # ذخیره قیمت
+                if product_data.get('price'):
+                    AmazonProductPrice.objects.create(
+                        product=product,
+                        price=product_data['price'],
+                        currency=country.get_currency_code(),
+                        country_code=country.code,
+                        seller=product_data.get('seller', ''),
+                        seller_type=product_data.get('seller_type', 'Third-Party'),
+                        availability=product_data.get('availability', True),
+                        stock_status='In Stock' if product_data.get('availability', True) else 'Out of Stock',
+                        shipping_info=product_data.get('shipping_info', ''),
+                        crawl_source='url_crawler',
+                        crawl_timestamp=timezone.now(),
+                    )
+
+                return product_data
+
+        except Exception as e:
+            logger.error(f"❌ Error saving product data: {e}")
+            return None
+
+    # بقیه متدها...
+    def crawl_products(self, asins, country_code='US', driver_name="amazon_crawler", session_id=None):
+        """Crawl کردن چندین محصول"""
         if not session_id:
             session_id = str(uuid.uuid4())
+
+        try:
+            country = Country.objects.get(code=country_code, is_active=True, is_available_for_crawling=True)
+        except Country.DoesNotExist:
+            logger.error(f"❌ Country not available: {country_code}")
+            return {'error': f'Country {country_code} not available'}
 
         # ایجاد session
         crawl_session = AmazonCrawlSession.objects.create(
             session_id=session_id,
             driver_name=driver_name,
+            country_code=country_code,
             total_products=len(asins),
             status='RUNNING'
         )
 
         results = {
             'session_id': session_id,
+            'country': country_code,
             'successful': [],
             'failed': [],
             'total': len(asins)
@@ -63,10 +183,23 @@ class AmazonCrawlerService:
                     logger.info(f"⏳ Waiting {delay:.1f} seconds...")
                     time.sleep(delay)
 
+                # دریافت درایور مخصوص کشور
+                driver = self.driver_manager.get_amazon_driver(country_code)
+
+                # تنظیم موقعیت
+                self.geo_manager.configure_location(driver, country)
+
+                # ایجاد پارسر
+                parser = AmazonProductParser(self.driver_manager, driver, country)
+
                 # crawl محصول
-                product_data = self._crawl_single_product(asin, driver_name)
+                product_data = parser.navigate_to_product(asin)
+                if product_data:
+                    product_data = parser.get_product_data()
 
                 if product_data:
+                    # ذخیره در دیتابیس
+                    self._save_product_data(product_data, country)
                     results['successful'].append(asin)
                     crawl_session.successful_crawls += 1
                     logger.info(f"✅ Successfully crawled: {asin}")
@@ -99,123 +232,92 @@ class AmazonCrawlerService:
             f"🎉 Crawl session completed: {crawl_session.successful_crawls} successful, {crawl_session.failed_crawls} failed")
         return results
 
-    def _crawl_single_product(self, asin, driver_name):
-        """Crawl کردن یک محصول"""
+    def verify_product_match(self, product_url, expected_asin):
+        """تأیید تطابق URL با محصول - بدون لود صفحه"""
         try:
-            # دریافت درایور
-            driver = self.get_amazon_driver(driver_name)
+            # استخراج ASIN و seller از URL
+            asin_from_url = self.driver_manager.extract_asin_from_url(product_url)
+            seller_from_url = self._extract_seller_from_url(product_url)
 
-            # ایجاد پارسر
-            parser = AmazonPageParser(driver)
+            # بررسی تطابق ASIN
+            asin_match = asin_from_url == expected_asin.upper()
 
-            # رفتن به صفحه محصول
-            if not parser.navigate_to_product_page(asin):
-                return None
-
-            # استخراج داده‌ها
-            product_data = parser.get_product_data()
-            if not product_data:
-                return None
-
-            # ذخیره در دیتابیس
-            return self._save_product_data(product_data, driver_name)
-
-        except Exception as e:
-            logger.error(f"❌ Error crawling product {asin}: {e}")
-            return None
-
-    def _save_product_data(self, product_data, driver_name):
-        """ذخیره داده‌های محصول با بررسی تاریخ آخرین crawl"""
-        try:
-            with transaction.atomic():
-                # ایجاد یا آپدیت محصول
-                product, created = AmazonProduct.objects.update_or_create(
-                    asin=product_data['asin'],
-                    defaults={
-                        'title': product_data.get('title', ''),
-                        'description': product_data.get('description', ''),
-                        'brand': product_data.get('brand', ''),
-                        'category': product_data.get('category', ''),
-                        'image_url': product_data.get('image_url', ''),
-                        'product_url': f"https://www.amazon.com/dp/{product_data['asin']}",
-                        'condition': product_data.get('condition', 'NEW'),
-                        'features': product_data.get('features', []),
-                        'specifications': product_data.get('specifications', {}),
-                        'rating': product_data.get('rating'),
-                        'review_count': product_data.get('review_count', 0),
-                        'last_crawled': timezone.now(),
-                        'is_active': True
+            if not asin_match:
+                return {
+                    'valid': False,
+                    'error': 'ASIN mismatch',
+                    'asin_match': False,
+                    'seller_match': False,
+                    'details': {
+                        'asin_from_url': asin_from_url,
+                        'expected_asin': expected_asin.upper()
                     }
-                )
+                }
 
-                # 🔥 بخش جدید: بررسی آیا در 24 ساعت گذشته قیمت ثبت شده
-                if product_data.get('price'):
-                    # پیدا کردن آخرین قیمت ثبت شده برای این محصول
-                    last_price = AmazonProductPrice.objects.filter(
-                        product=product,
-                        crawl_timestamp__gte=timezone.now() - timezone.timedelta(hours=24)
-                    ).order_by('-crawl_timestamp').first()
+            # پیدا کردن محصول در دیتابیس
+            try:
+                product = AmazonProduct.objects.get(asin=expected_asin.upper())
+                seller_from_db = product.seller
 
-                    if last_price:
-                        # اگر قیمت در 24 ساعت گذشته ثبت شده، فقط لاگ می‌کنیم
-                        logger.info(
-                            f"💰 Price already exists for ASIN {product_data['asin']} in last 24 hours. Skipping new price record.")
-                        logger.info(
-                            f"   Last price: {last_price.price} {last_price.currency} at {last_price.crawl_timestamp}")
-                        logger.info(f"   Current price: {product_data['price']} {product_data.get('currency', 'USD')}")
-                    else:
-                        # اگر قیمت در 24 ساعت گذشته ثبت نشده، رکورد جدید ایجاد می‌کنیم
-                        AmazonProductPrice.objects.create(
-                            product=product,
-                            price=product_data['price'],
-                            currency=product_data.get('currency', 'USD'),
-                            seller=product_data.get('seller', 'Amazon'),
-                            seller_type='Amazon' if 'amazon' in product_data.get('seller',
-                                                                                 '').lower() else 'Third-Party',
-                            availability=product_data.get('availability', True),
-                            stock_status='In Stock' if product_data.get('availability', True) else 'Out of Stock',
-                            shipping_info=product_data.get('shipping_info', ''),
-                            crawl_source=driver_name,
-                            crawl_timestamp=timezone.now(),
-                            metadata={
-                                'session_url': f"https://www.amazon.com/dp/{product_data['asin']}",
-                                'price_change': self._calculate_price_change(product, product_data['price'])
-                            }
-                        )
-                        logger.info(
-                            f"✅ New price record created for ASIN {product_data['asin']}: {product_data['price']} {product_data.get('currency', 'USD')}")
-
-                return product_data
-
-        except Exception as e:
-            logger.error(f"❌ Error saving product data: {e}")
-            return None
-
-    def _calculate_price_change(self, product, current_price):
-        """محاسبه تغییرات قیمت نسبت به آخرین رکورد"""
-        try:
-            # پیدا کردن آخرین قیمت قبل از 24 ساعت گذشته
-            last_old_price = AmazonProductPrice.objects.filter(
-                product=product,
-                crawl_timestamp__lt=timezone.now() - timezone.timedelta(hours=24)
-            ).order_by('-crawl_timestamp').first()
-
-            if last_old_price:
-                price_diff = current_price - last_old_price.price
-                price_diff_percent = (price_diff / last_old_price.price) * 100 if last_old_price.price else 0
+                # بررسی تطابق seller
+                seller_match = self._check_seller_match(seller_from_url, seller_from_db) if seller_from_url else True
 
                 return {
-                    'previous_price': float(last_old_price.price),
-                    'price_difference': float(price_diff),
-                    'percentage_change': float(price_diff_percent),
-                    'trend': 'up' if price_diff > 0 else 'down' if price_diff < 0 else 'stable'
+                    'valid': True,
+                    'url': product_url,
+                    'asin_match': asin_match,
+                    'seller_match': seller_match,
+                    'details': {
+                        'asin_from_url': asin_from_url,
+                        'expected_asin': expected_asin.upper(),
+                        'seller_from_url': seller_from_url,
+                        'seller_from_db': seller_from_db
+                    }
                 }
-            return None
-        except Exception as e:
-            logger.debug(f"Could not calculate price change: {e}")
-            return None
 
-    # متدهای کمکی همون قبلی می‌مونن
+            except AmazonProduct.DoesNotExist:
+                return {
+                    'valid': False,
+                    'error': 'Product not found in database',
+                    'asin_match': asin_match,
+                    'seller_match': False,
+                    'details': {
+                        'asin_from_url': asin_from_url,
+                        'expected_asin': expected_asin.upper(),
+                        'seller_from_url': seller_from_url
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Error verifying product match: {e}")
+            return {
+                'valid': False,
+                'error': str(e)
+            }
+
+    def _extract_seller_from_url(self, url):
+        """استخراج seller از URL (پارامتر m)"""
+        try:
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query)
+
+            if 'm' in query_params:
+                return query_params['m'][0]
+            return ""
+        except:
+            return ""
+
+    def _check_seller_match(self, seller_from_url, seller_from_db):
+        """بررسی تطابق seller"""
+        if not seller_from_url or not seller_from_db:
+            return True  # اگر یکی خالی باشه، تطابق رو در نظر بگیر
+
+        # نرمال‌سازی برای مقایسه
+        url_seller = seller_from_url.lower().replace(' ', '').replace('-', '').replace('_', '')
+        db_seller = seller_from_db.lower().replace(' ', '').replace('-', '').replace('_', '')
+
+        return url_seller in db_seller or db_seller in url_seller or url_seller == db_seller
+
     def get_product_history(self, asin, days=30):
         """دریافت تاریخچه قیمت محصول"""
         from .models import AmazonProductPrice

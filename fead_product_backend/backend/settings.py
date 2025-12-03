@@ -71,11 +71,13 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
+    'drf_yasg',
     ############
     'auth_app',
     'selenium_app',
     'amazon_app',
     'telegram_manager',
+    'contract_manager',
 ]
 
 MIDDLEWARE = [
@@ -253,7 +255,7 @@ LOGGING = {
     },
 }
 
-LOGGING = {}
+# LOGGING = {}
 # Django REST Framework
 REST_FRAMEWORK = {
     # Authentication
@@ -301,3 +303,60 @@ SIMPLE_JWT = {
 # Telegram Bot Settings
 TELEGRAM_BOT_TOKEN = env('TELEGRAM_BOT_TOKEN', 'your_bot_token')
 TELEGRAM_WEB_APP_URL = env('TELEGRAM_WEB_APP_URL', 'https://yourdomain.com')
+
+# Swagger settings
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': 'JWT Authorization header using the Bearer scheme. Example: "Bearer {token}"'
+        }
+    },
+    'USE_SESSION_AUTH': False,
+    'JSON_EDITOR': True,
+    'DOC_EXPANSION': 'none',
+    'DEFAULT_INFO': 'backend.urls.schema_view',
+    'VALIDATOR_URL': None,
+}
+
+# Redoc settings
+REDOC_SETTINGS = {
+    'LAZY_RENDERING': False,
+    'NATIVE_SCROLLBARS': False,
+    'REQUIRED_PROPS_FIRST': True,
+    'NO_AUTO_AUTH': True,
+    'HIDE_HOSTNAME': False,
+}
+
+# OpenAPI settings
+OPENAPI_INFO = {
+    'title': 'Telegram Manager API',
+    'default_version': 'v1',
+    'description': """
+    API for managing Telegram channels and messages
+
+    ## Authentication
+    This API uses JWT authentication.
+
+    1. First, obtain a token:
+       ```
+       POST /api/token/
+       ```
+       Body: `{"username": "your_username", "password": "your_password"}`
+
+    2. Use the token in your requests:
+       ```
+       Authorization: Bearer {your_token}
+       ```
+    """,
+    'terms_of_service': 'https://www.google.com/policies/terms/',
+    'contact': {
+        'email': 'contact@example.com'
+    },
+    'license': {
+        'name': 'BSD License',
+        'url': 'https://opensource.org/licenses/BSD-3-Clause'
+    }
+}

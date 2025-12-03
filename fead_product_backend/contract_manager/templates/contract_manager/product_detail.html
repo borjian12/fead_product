@@ -1,0 +1,212 @@
+<!-- contract_manager/templates/contract_manager/product_detail.html -->
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Product Details</h1>
+        <div>
+            <a href="{% url 'contract_manager:product_list' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to List
+            </a>
+            <a href="{% url 'contract_manager:edit_product' product.id %}" class="btn btn-warning">
+                <i class="fas fa-edit"></i> Edit
+            </a>
+            <a href="{% url 'contract_manager:refresh_product_data' product.id %}" class="btn btn-info">
+                <i class="fas fa-sync"></i> Refresh Data
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Product Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            {% if product.amazon_product.image_url %}
+                            <img src="{{ product.amazon_product.image_url }}"
+                                 class="img-fluid rounded"
+                                 alt="{{ product.title }}">
+                            {% endif %}
+                        </div>
+                        <div class="col-md-9">
+                            <h4>{{ product.title }}</h4>
+                            <table class="table table-sm">
+                                <tr>
+                                    <th width="30%">ASIN:</th>
+                                    <td>{{ product.asin }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Country:</th>
+                                    <td>
+                                        {{ product.country.name }} ({{ product.country.code }})
+                                        <span class="badge bg-info">{{ product.country.amazon_domain }}</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Status:</th>
+                                    <td>
+                                        <span class="badge {% if product.is_active %}bg-success{% else %}bg-danger{% endif %}">
+                                            {{ product.is_active|yesno:"Active,Inactive" }}
+                                        </span>
+                                        <span class="badge {% if product.is_stopped %}bg-warning{% else %}bg-secondary{% endif %}">
+                                            {{ product.is_stopped|yesno:"Stopped,Running" }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>URL:</th>
+                                    <td>
+                                        <a href="{{ product.get_amazon_url }}" target="_blank">
+                                            View on Amazon <i class="fas fa-external-link-alt"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <h5>Amazon Data</h5>
+                    {% if product.amazon_product %}
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Price:</strong>
+                                {% if product.amazon_product.price %}
+                                {{ product.amazon_product.currency }}{{ product.amazon_product.price }}
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </p>
+                            <p><strong>Rating:</strong>
+                                {% if product.amazon_product.rating %}
+                                {{ product.amazon_product.rating }}/5 ({{ product.amazon_product.review_count }} reviews)
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Availability:</strong>
+                                <span class="badge {% if product.amazon_product.availability %}bg-success{% else %}bg-danger{% endif %}">
+                                    {{ product.amazon_product.availability|yesno:"In Stock,Out of Stock" }}
+                                </span>
+                            </p>
+                            <p><strong>Brand:</strong> {{ product.amazon_product.brand|default:"N/A" }}</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        No Amazon data available.
+                        <a href="{% url 'contract_manager:refresh_product_data' product.id %}">Refresh data</a>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if product.description or product.search_guide %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Additional Information</h5>
+                </div>
+                <div class="card-body">
+                    {% if product.description %}
+                    <h6>Description</h6>
+                    <p>{{ product.description }}</p>
+                    {% endif %}
+
+                    {% if product.search_guide %}
+                    <h6>Search Guide</h6>
+                    <p class="text-muted">{{ product.search_guide }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Quick Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        {% if has_channels %}
+                        <a href="{% url 'contract_manager:send_to_telegram' product.id %}"
+                           class="btn btn-success btn-lg">
+                            <i class="fab fa-telegram"></i> Send to Telegram
+                        </a>
+                        {% else %}
+                        <button class="btn btn-secondary btn-lg" disabled>
+                            <i class="fab fa-telegram"></i> No Channels Available
+                        </button>
+                        <small class="text-muted text-center">
+                            No active Telegram channels found for {{ product.country.name }}
+                        </small>
+                        {% endif %}
+
+                        <a href="{% url 'contract_manager:refresh_product_data' product.id %}"
+                           class="btn btn-info">
+                            <i class="fas fa-sync"></i> Refresh Amazon Data
+                        </a>
+
+                        {% if product.is_stopped %}
+                        <form method="post" action="{% url 'contract_manager:api_product_action' product.id 'resume' %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-warning">
+                                <i class="fas fa-play"></i> Resume Product
+                            </button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{% url 'contract_manager:api_product_action' product.id 'stop' %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-danger">
+                                <i class="fas fa-stop"></i> Stop Product
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Telegram Messages</h5>
+                </div>
+                <div class="card-body">
+                    {% if telegram_messages %}
+                    <div class="list-group">
+                        {% for msg in telegram_messages %}
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">{{ msg.channel.name }}</h6>
+                                <span class="badge bg-{% if msg.status == 'sent' %}success{% elif msg.status == 'failed' %}danger{% else %}secondary{% endif %}">
+                                    {{ msg.status|title }}
+                                </span>
+                            </div>
+                            <p class="mb-1">
+                                {% if msg.telegram_message_id %}
+                                Message ID: {{ msg.telegram_message_id }}<br>
+                                {% endif %}
+                                Sent: {% if msg.sent_at %}{{ msg.sent_at|timesince }} ago{% else %}Not sent{% endif %}
+                            </p>
+                            <small>
+                                Views: {{ msg.view_count }} | Clicks: {{ msg.click_count }}
+                            </small>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No Telegram messages sent yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
