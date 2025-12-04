@@ -9,7 +9,8 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from django.utils import timezone
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+User = get_user_model()
 
 from .models import TelegramChannel, TelegramMessage, MessageEditHistory, MessageSendingLog
 from .serializers import (
@@ -97,6 +98,9 @@ class TelegramMessageViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return TelegramMessage.objects.none()
+
         queryset = super().get_queryset()
 
         if self.request.user.is_staff:
@@ -332,6 +336,9 @@ class MessageEditHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return MessageEditHistory.objects.none()
+
         queryset = super().get_queryset()
 
         if self.request.user.is_staff:
@@ -347,6 +354,9 @@ class MessageSendingLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return MessageSendingLog.objects.none()
+
         queryset = super().get_queryset()
 
         if self.request.user.is_staff:

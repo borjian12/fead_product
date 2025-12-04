@@ -1,6 +1,6 @@
-# contract_manager/models.py
 from django.db import models
-from django.contrib.auth.models import User
+from auth_app.models import SellerProfile, AgentProfile, AdminProfile, CustomUser
+from django.conf import settings
 from django.utils import timezone
 import uuid
 import os
@@ -12,7 +12,6 @@ def country_icon_upload_path(instance, filename):
     filename = f"{instance.code}.{ext}"
     return f'countries/icons/{filename}'
 
-
 def country_flag_upload_path(instance, filename):
     """مسیر آپلود پرچم کشور"""
     ext = filename.split('.')[-1]
@@ -22,7 +21,6 @@ def country_flag_upload_path(instance, filename):
 
 class Currency(models.Model):
     """مدیریت ارزها و نرخ تبدیل"""
-
     class Meta:
         app_label = 'contract_manager'
         verbose_name = "Currency"
@@ -47,7 +45,6 @@ class Currency(models.Model):
 
 class Country(models.Model):
     """مدیریت کامل کشورها"""
-
     class Meta:
         app_label = 'contract_manager'
         verbose_name = "Country"
@@ -56,45 +53,29 @@ class Country(models.Model):
         db_table = "countries"
 
     CODE_CHOICES = [
-        ('US', 'United States'),
-        ('UK', 'United Kingdom'),
-        ('DE', 'Germany'),
-        ('FR', 'France'),
-        ('IT', 'Italy'),
-        ('ES', 'Spain'),
-        ('IR', 'Iran'),
-        ('TR', 'Turkey'),
-        ('AE', 'United Arab Emirates'),
-        ('SA', 'Saudi Arabia'),
-        ('CN', 'China'),
-        ('JP', 'Japan'),
-        ('KR', 'South Korea'),
-        ('IN', 'India'),
-        ('BR', 'Brazil'),
-        ('CA', 'Canada'),
-        ('AU', 'Australia'),
-        ('NL', 'Netherlands'),
+        ('US', 'United States'), ('UK', 'United Kingdom'), ('DE', 'Germany'),
+        ('FR', 'France'), ('IT', 'Italy'), ('ES', 'Spain'), ('IR', 'Iran'),
+        ('TR', 'Turkey'), ('AE', 'United Arab Emirates'), ('SA', 'Saudi Arabia'),
+        ('CN', 'China'), ('JP', 'Japan'), ('KR', 'South Korea'), ('IN', 'India'),
+        ('BR', 'Brazil'), ('CA', 'Canada'), ('AU', 'Australia'), ('NL', 'Netherlands'),
         ('SE', 'Sweden'),
     ]
 
     # اطلاعات پایه
-    code = models.CharField(max_length=2, choices=CODE_CHOICES, unique=True, verbose_name="Country Code",
-                            primary_key=True)
+    code = models.CharField(max_length=2, choices=CODE_CHOICES, unique=True, verbose_name="Country Code", primary_key=True)
     name = models.CharField(max_length=100, verbose_name="Country Name")
     native_name = models.CharField(max_length=100, blank=True, verbose_name="Native Name")
 
     # رسانه
     icon = models.ImageField(
         upload_to=country_icon_upload_path,
-        blank=True,
-        null=True,
+        blank=True, null=True,
         verbose_name="Country Icon",
         help_text="آیکون کوچک برای کشور"
     )
     flag = models.ImageField(
         upload_to=country_flag_upload_path,
-        blank=True,
-        null=True,
+        blank=True, null=True,
         verbose_name="Country Flag",
         help_text="پرچم ملی کشور"
     )
@@ -116,8 +97,7 @@ class Country(models.Model):
     default_currency = models.ForeignKey(
         Currency,
         on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
+        null=True, blank=True,
         verbose_name="Default Currency",
         help_text="ارز پیش‌فرض برای این کشور"
     )
@@ -135,31 +115,14 @@ class Country(models.Model):
     )
 
     # موقعیت جغرافیایی پیش‌فرض برای کراولینگ
-    default_zip_code = models.CharField(
-        max_length=20,
-        blank=True,
-        verbose_name="Default ZIP Code",
-        help_text="کد پستی پیش‌فرض برای تنظیم موقعیت در آمازون"
-    )
-    default_city = models.CharField(
-        max_length=100,
-        blank=True,
-        verbose_name="Default City",
-        help_text="شهر پیش‌فرض برای تنظیم موقعیت"
-    )
-    default_state = models.CharField(
-        max_length=100,
-        blank=True,
-        verbose_name="Default State",
-        help_text="استان پیش‌فرض برای تنظیم موقعیت"
-    )
+    default_zip_code = models.CharField(max_length=20, blank=True, verbose_name="Default ZIP Code")
+    default_city = models.CharField(max_length=100, blank=True, verbose_name="Default City")
+    default_state = models.CharField(max_length=100, blank=True, verbose_name="Default State")
 
     # وضعیت
     is_active = models.BooleanField(default=True, verbose_name="Active")
     is_available_for_products = models.BooleanField(default=True, verbose_name="Available for Products")
     is_available_for_crawling = models.BooleanField(default=True, verbose_name="Available for Crawling")
-
-    # ترتیب نمایش
     display_order = models.IntegerField(default=0, verbose_name="Display Order")
 
     # زمان‌ها
@@ -170,19 +133,16 @@ class Country(models.Model):
         return f"{self.name} ({self.code})"
 
     def save(self, *args, **kwargs):
-        """اتوماتیک کردن Amazon URL اگر خالی باشد"""
         if not self.amazon_url and self.amazon_domain:
             self.amazon_url = f"https://www.{self.amazon_domain}"
         super().save(*args, **kwargs)
 
     def get_amazon_product_url(self, asin):
-        """ایجاد URL محصول آمازون برای این کشور"""
         if self.amazon_domain:
             return f"https://www.{self.amazon_domain}/dp/{asin}"
         return f"https://www.amazon.com/dp/{asin}"
 
     def get_related_channels(self):
-        """دریافت کانال‌های مرتبط با این کشور"""
         from telegram_manager.models import TelegramChannel
         try:
             return TelegramChannel.objects.filter(country=self.code, is_active=True)
@@ -190,15 +150,12 @@ class Country(models.Model):
             return TelegramChannel.objects.none()
 
     def get_primary_channel(self):
-        """دریافت کانال اصلی برای این کشور"""
         channels = self.get_related_channels()
         return channels.first()
 
     def get_currency_code(self):
-        """دریافت کد ارز"""
         if self.default_currency:
             return self.default_currency.code
-        # ارز پیش‌فرض بر اساس کشور
         currency_map = {
             'US': 'USD', 'UK': 'GBP', 'DE': 'EUR', 'FR': 'EUR', 'IT': 'EUR',
             'ES': 'EUR', 'CA': 'CAD', 'AU': 'AUD', 'JP': 'JPY', 'IN': 'INR',
@@ -207,53 +164,46 @@ class Country(models.Model):
         }
         return currency_map.get(self.code, 'USD')
 
-    def get_amazon_settings(self):
-        """دریافت تنظیمات آمازون برای کراولینگ"""
-        return {
-            'domain': self.amazon_domain,
-            'base_url': self.amazon_url,
-            'language': self.language,
-            'currency': self.get_currency_code(),
-            'zip_code': self.default_zip_code,
-            'city': self.default_city,
-            'state': self.default_state,
-            'timezone': self.timezone
-        }
-
-    @property
-    def has_amazon(self):
-        """آیا این کشور آمازون دارد؟"""
-        return bool(self.amazon_domain and self.amazon_domain != 'amazon.com')
-
     @classmethod
     def get_amazon_countries(cls):
-        """دریافت کشورهای دارای آمازون"""
+        """دریافت کشورهایی که Amazon در آنها فعال است"""
+        # کشورهایی که به طور پیش‌فرض Amazon دارند
+        amazon_country_codes = [
+            'US', 'UK', 'DE', 'FR', 'IT', 'ES', 'CA', 'AU',
+            'JP', 'IN', 'BR', 'MX', 'NL', 'SE', 'PL', 'SG',
+            'AE', 'SA', 'TR', 'CN'
+        ]
+
         return cls.objects.filter(
+            code__in=amazon_country_codes,
             is_active=True,
             is_available_for_crawling=True
-        ).exclude(amazon_domain='')
+        )
 
-    def clean(self):
-        """اعتبارسنجی مدل"""
-        from django.core.exceptions import ValidationError
+    # اضافه کردن متد برای آیکون و پرچم (اختیاری)
+    def get_icon_url(self):
+        """دریافت URL آیکون کشور"""
+        if self.icon:
+            return self.icon.url
+        return None
 
-        if self.amazon_domain and 'amazon.' not in self.amazon_domain:
-            raise ValidationError({
-                'amazon_domain': 'دامنه آمازون باید شامل "amazon." باشد'
-            })
-
-    # متدهای کمکی برای نمایش
     def get_flag_url(self):
-        """دریافت URL پرچم"""
+        """دریافت URL پرچم کشور"""
         if self.flag:
             return self.flag.url
         return None
 
-    def get_icon_url(self):
-        """دریافت URL آیکون"""
-        if self.icon:
-            return self.icon.url
-        return None
+    @property
+    def has_amazon(self):
+        """بررسی اینکه آیا این کشور Amazon دارد"""
+        amazon_domains = [
+            'amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
+            'amazon.it', 'amazon.es', 'amazon.ca', 'amazon.com.au',
+            'amazon.co.jp', 'amazon.in', 'amazon.com.br', 'amazon.com.mx',
+            'amazon.nl', 'amazon.se', 'amazon.pl', 'amazon.sg',
+            'amazon.ae', 'amazon.sa', 'amazon.com.tr', 'amazon.cn'
+        ]
+        return any(domain in self.amazon_domain for domain in amazon_domains)
 
 
 class CountryChannelConfig(models.Model):
@@ -297,7 +247,6 @@ class CountryChannelConfig(models.Model):
 
 class ActionType(models.Model):
     """انواع اکشن‌های ممکن"""
-
     class Meta:
         app_label = 'contract_manager'
         verbose_name = "Action Type"
@@ -321,88 +270,8 @@ class ActionType(models.Model):
         return self.get_name_display()
 
 
-class AdminProfile(models.Model):
-    """پروفایل ادمین"""
-
-    class Meta:
-        app_label = 'contract_manager'
-        verbose_name = "Admin Profile"
-        verbose_name_plural = "Admin Profiles"
-        db_table = "contract_admin_profile"
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="User Account",
-                                related_name="admin_profile")
-    role = models.CharField(max_length=50, choices=[
-        ('super_admin', 'Super Admin'),
-        ('admin', 'Admin'),
-        ('support', 'Support'),
-    ], default='admin')
-    permissions = models.JSONField(default=dict, blank=True, help_text="دسترسی‌های اضافی")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"Admin: {self.user.username}"
-
-
-class Agent(models.Model):
-    """نمایندگان سایت"""
-
-    class Meta:
-        app_label = 'contract_manager'
-        verbose_name = "Agent"
-        verbose_name_plural = "Agents"
-        db_table = "contract_agent"
-
-    AGENT_TYPES = [
-        ('internal', 'Internal Agent'),  # از تیم خودمان
-        ('external', 'External Agent'),  # از خارج
-    ]
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="User Account", related_name="agent")
-    agent_type = models.CharField(max_length=10, choices=AGENT_TYPES, default='external')
-    company_name = models.CharField(max_length=255, verbose_name="Company/Agent Name")
-    contact_email = models.EmailField(verbose_name="Contact Email")
-    contact_phone = models.CharField(max_length=20, blank=True, verbose_name="Contact Phone")
-    assigned_sellers = models.ManyToManyField('Seller', blank=True, related_name="agents",
-                                              verbose_name="Assigned Sellers")
-    is_active = models.BooleanField(default=True, verbose_name="Active")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"Agent: {self.company_name} ({self.get_agent_type_display()})"
-
-
-class Seller(models.Model):
-    """فروشندگان/نمایندگان"""
-
-    class Meta:
-        app_label = 'contract_manager'
-        verbose_name = "Seller"
-        verbose_name_plural = "Sellers"
-        db_table = "contract_seller"
-
-    SELLER_TYPES = [
-        ('seller', 'Seller'),
-        ('agent', 'Agent'),
-    ]
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="User Account", related_name="seller")
-    seller_type = models.CharField(max_length=10, choices=SELLER_TYPES, verbose_name="Seller Type")
-    company_name = models.CharField(max_length=255, verbose_name="Company Name")
-    contact_email = models.EmailField(verbose_name="Contact Email")
-    contact_phone = models.CharField(max_length=20, blank=True, verbose_name="Contact Phone")
-    is_verified = models.BooleanField(default=False, verbose_name="Verified")
-    assigned_agent = models.ForeignKey(Agent, on_delete=models.SET_NULL, null=True, blank=True,
-                                      related_name="managed_sellers", verbose_name="Assigned Agent")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.company_name} ({self.get_seller_type_display()})"
-
-
 class ContractTemplate(models.Model):
     """تمپلیت قرارداد برای هر سلر"""
-
     class Meta:
         app_label = 'contract_manager'
         verbose_name = "Contract Template"
@@ -410,7 +279,12 @@ class ContractTemplate(models.Model):
         unique_together = ['seller', 'action_type']
         db_table = "contract_template"
 
-    seller = models.ForeignKey(Seller, on_delete=models.CASCADE, verbose_name="Seller")
+    # تغییر به SellerProfile از auth_app
+    seller = models.ForeignKey(
+        SellerProfile,
+        on_delete=models.CASCADE,
+        verbose_name="Seller"
+    )
     action_type = models.ForeignKey(ActionType, on_delete=models.CASCADE, verbose_name="Action Type")
     refund_percentage = models.DecimalField(
         max_digits=5,
@@ -439,7 +313,6 @@ class ContractTemplate(models.Model):
 
 class Product(models.Model):
     """مدیریت محصولات"""
-
     class Meta:
         app_label = 'contract_manager'
         verbose_name = "Product"
@@ -472,8 +345,12 @@ class Product(models.Model):
     total_max_quantity = models.IntegerField(default=100, verbose_name="Total Max Quantity")
     current_quantity = models.IntegerField(default=0, verbose_name="Current Quantity")
 
-    # مالکیت
-    owner = models.ForeignKey(Seller, on_delete=models.CASCADE, verbose_name="Owner")
+    # مالکیت - تغییر به SellerProfile
+    owner = models.ForeignKey(
+        SellerProfile,
+        on_delete=models.CASCADE,
+        verbose_name="Owner"
+    )
 
     # وضعیت
     is_active = models.BooleanField(default=True, verbose_name="Active")
@@ -483,8 +360,7 @@ class Product(models.Model):
     amazon_product = models.ForeignKey(
         'amazon_app.AmazonProduct',
         on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
+        null=True, blank=True,
         verbose_name="Amazon Product Data"
     )
 
@@ -536,7 +412,6 @@ class Product(models.Model):
 
     def get_telegram_messages(self):
         """دریافت تمام پیام‌های تلگرام محصول"""
-        from .models import ProductChannel
         return ProductChannel.objects.filter(product=self)
 
     def stop_all_messages(self):
@@ -764,7 +639,7 @@ class ProductUpdateLog(models.Model):
     affected_channels = models.JSONField(default=list, verbose_name="Affected Channels")
     telegram_updates_sent = models.BooleanField(default=False, verbose_name="Telegram Updates Sent")
 
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Created By")
+    created_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Created By")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

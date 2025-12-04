@@ -1,11 +1,8 @@
-# auth_app/utils.py
 import hmac
 import hashlib
 import urllib.parse
 import time
 import json
-import jwt
-from datetime import datetime, timedelta
 from django.conf import settings
 
 
@@ -20,7 +17,7 @@ def verify_init_data(init_data: str) -> dict | None:
         if not hash_received:
             return None
 
-        # ساخت data_check_string مطابق داکیومنت تلگرام
+        # ساخت data_check_string
         data_check_string = "\n".join(
             f"{k}={v}" for k, v in sorted(parsed.items()) if k != "hash"
         )
@@ -52,41 +49,4 @@ def verify_init_data(init_data: str) -> dict | None:
 
     except Exception as e:
         print(f"Error verifying init data: {e}")
-        return None
-
-
-def generate_jwt(user_id: int) -> str:
-    """
-    تولید توکن JWT
-    """
-    now = datetime.utcnow()
-    payload = {
-        "user_id": user_id,
-        "exp": now + timedelta(days=7),  # 7 روز اعتبار
-        "iat": now,
-        "type": "telegram_miniapp"
-    }
-
-    token = jwt.encode(
-        payload,
-        settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM
-    )
-    return token
-
-
-def verify_jwt(token: str) -> dict | None:
-    """
-    بررسی اعتبار توکن JWT
-    """
-    try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM]
-        )
-        return payload
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
         return None

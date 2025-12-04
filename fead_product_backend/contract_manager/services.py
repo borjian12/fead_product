@@ -1,4 +1,3 @@
-# contract_manager/services.py
 from typing import List, Tuple, Optional, Dict
 from django.utils import timezone
 from django.db.models import Max, Q
@@ -7,6 +6,7 @@ from telegram_manager.models import TelegramMessage, TelegramChannel
 from .models import Product, ProductContract, CountryChannelConfig, Country, ProductChannel
 from amazon_app.amazon_crawler import AmazonCrawlerService
 from amazon_app.models import AmazonProduct
+from auth_app.models import SellerProfile
 import json
 
 
@@ -65,7 +65,7 @@ class ProductCrawlerService:
         except Exception as e:
             return None, f"Error crawling product: {str(e)}"
 
-    def crawl_and_create_product(self, asin: str, country_code: str, owner, **product_data) -> Tuple[
+    def crawl_and_create_product(self, asin: str, country_code: str, owner: SellerProfile, **product_data) -> Tuple[
         Optional[Product], str]:
         """کراول کردن محصول و ایجاد رکورد کامل در Contract Manager با پشتیبانی کشور"""
         try:
@@ -123,7 +123,7 @@ class ProductCrawlerService:
         except Exception as e:
             return False, f"Error refreshing product: {str(e)}"
 
-    def crawl_by_url(self, url: str, owner, **product_data) -> Tuple[Optional[Product], str]:
+    def crawl_by_url(self, url: str, owner: SellerProfile, **product_data) -> Tuple[Optional[Product], str]:
         """کراول کردن محصول با URL و ایجاد در Contract Manager"""
         try:
             # استفاده از سرویس کراولینگ آمازون

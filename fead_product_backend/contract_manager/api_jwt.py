@@ -1,13 +1,15 @@
-# contract_manager/api_jwt.py
 from django.utils import timezone
 from rest_framework import viewsets, status, permissions, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.contrib.auth.models import User
+
+# تغییر import ها
+from auth_app.models import SellerProfile, AgentProfile, AdminProfile, CustomUser
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
-from .models import Product, Country, ProductChannel, Seller, ProductUpdateLog, Agent, AdminProfile
+from .models import Product, Country, ProductChannel, ProductUpdateLog, ContractTemplate
 from .serializers import CountrySerializer, ProductSerializer
 from .services import ProductCrawlerService, ProductMessageService
 from telegram_manager.models import TelegramChannel
@@ -17,258 +19,6 @@ from .api_permissions import (
     IsAdminOrSellerOrAgentForAssigned, CanManageProductChannels
 )
 import uuid
-
-
-class SellerManagementAPIView(APIView):
-    """API برای مدیریت Sellerها توسط Admin"""
-    permission_classes = [permissions.IsAuthenticated, IsAdmin]
-
-    def get(self, request):
-        """دریافت لیست همه Sellerها"""
-        sellers = Seller.objects.all().select_related('user', 'assigned_agent')
-
-        seller_data = []
-        for seller in sellers:
-            seller_data.append({
-                'id': str(seller.id),
-                'user_id': seller.user.id,
-                'username': seller.user.username,
-                'seller_type': seller.seller_type,
-                'company_name': seller.company_name,
-                'contact_email': seller.contact_email,
-                'contact_phone': seller.contact_phone,
-                'is_verified': seller.is_verified,
-                'agent': {
-                    'id': str(seller.assigned_agent.id) if seller.assigned_agent else None,
-                    'name': seller.assigned_agent.company_name if seller.assigned_agent else None,
-                } if seller.assigned_agent else None,
-                'created_at': seller.created_at.isoformat(),
-                'product_count': Product.objects.filter(owner=seller).count()
-            })
-
-        return Response({
-            'sellers': seller_data,
-            'count': len(seller_data)
-        })
-
-    def post(self, request):
-        """ایجاد Seller جدید"""
-        username = request.data.get('username')
-        email = request.data.get('email')
-        password = request.data.get('password')
-        company_name = request.data.get('company_name')
-        seller_type = request.data.get('seller_type', 'seller')
-        contact_email = request.data.get('contact_email')
-        contact_phone = request.data.get('contact_phone', '')
-        agent_id = request.data.get('agent_id')
-
-        # اعتبارسنجی داده‌ها
-        if not all([username, email, password, company_name, contact_email]):
-            return Response({
-                'error': 'Missing required fields'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # بررسی وجود کاربر
-        if User.objects.filter(username=username).exists():
-            return Response({
-                'error': 'Username already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if User.objects.filter(email=email).exists():
-            return Response({
-                'error': 'Email already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # ایجاد کاربر
-        try:
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password
-            )
-
-            # ایجاد Seller
-            seller = Seller.objects.create(
-                user=user,
-                seller_type=seller_type,
-                company_name=company_name,
-                contact_email=contact_email,
-                contact_phone=contact_phone,
-                is_verified=True
-            )
-
-            # اگر Agent مشخص شده باشد
-            if agent_id:
-                try:
-                    agent = Agent.objects.get(id=agent_id)
-                    seller.assigned_agent = agent
-                    seller.save()
-                except Agent.DoesNotExist:
-                    pass
-
-            return Response({
-                'success': True,
-                'message': 'Seller created successfully',
-                'seller_id': str(seller.id),
-                'user_id': user.id
-            }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            # در صورت خطا، کاربر ایجاد شده را پاک کن
-            if 'user' in locals():
-                user.delete()
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def put(self, request, seller_id=None):
-        """ویرایش Seller"""
-        if not seller_id:
-            return Response({
-                'error': 'seller_id is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            seller = Seller.objects.get(id=seller_id)
-        except Seller.DoesNotExist:
-            return Response({
-                'error': 'Seller not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-        # به‌روزرسانی فیلدها
-        fields_to_update = [
-            'company_name', 'seller_type', 'contact_email',
-            'contact_phone', 'is_verified'
-        ]
-
-        for field in fields_to_update:
-            if field in request.data:
-                setattr(seller, field, request.data[field])
-
-        # به‌روزرسانی Agent
-        if 'agent_id' in request.data:
-            agent_id = request.data['agent_id']
-            if agent_id:
-                try:
-                    agent = Agent.objects.get(id=agent_id)
-                    seller.assigned_agent = agent
-                except Agent.DoesNotExist:
-                    return Response({
-                        'error': 'Agent not found'
-                    }, status=status.HTTP_404_NOT_FOUND)
-            else:
-                seller.assigned_agent = None
-
-        seller.save()
-
-        return Response({
-            'success': True,
-            'message': 'Seller updated successfully',
-            'seller': {
-                'id': str(seller.id),
-                'company_name': seller.company_name,
-                'seller_type': seller.seller_type,
-                'is_verified': seller.is_verified,
-                'agent_id': str(seller.assigned_agent.id) if seller.assigned_agent else None
-            }
-        })
-
-
-class AgentManagementAPIView(APIView):
-    """API برای مدیریت Agentها"""
-    permission_classes = [permissions.IsAuthenticated, IsAdmin]
-
-    def get(self, request):
-        """دریافت لیست Agentها"""
-        agents = Agent.objects.all().select_related('user')
-
-        agent_data = []
-        for agent in agents:
-            agent_data.append({
-                'id': str(agent.id),
-                'user_id': agent.user.id,
-                'username': agent.user.username,
-                'agent_type': agent.agent_type,
-                'company_name': agent.company_name,
-                'contact_email': agent.contact_email,
-                'contact_phone': agent.contact_phone,
-                'commission_rate': float(agent.commission_rate),
-                'is_active': agent.is_active,
-                'assigned_sellers_count': agent.assigned_sellers.count(),
-                'created_at': agent.created_at.isoformat()
-            })
-
-        return Response({
-            'agents': agent_data,
-            'count': len(agent_data)
-        })
-
-    def post(self, request):
-        """ایجاد Agent جدید"""
-        username = request.data.get('username')
-        email = request.data.get('email')
-        password = request.data.get('password')
-        company_name = request.data.get('company_name')
-        agent_type = request.data.get('agent_type', 'external')
-        contact_email = request.data.get('contact_email')
-        contact_phone = request.data.get('contact_phone', '')
-        commission_rate = request.data.get('commission_rate', 0.0)
-
-        # اعتبارسنجی داده‌ها
-        if not all([username, email, password, company_name, contact_email]):
-            return Response({
-                'error': 'Missing required fields'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # بررسی وجود کاربر
-        if User.objects.filter(username=username).exists():
-            return Response({
-                'error': 'Username already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if User.objects.filter(email=email).exists():
-            return Response({
-                'error': 'Email already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # ایجاد کاربر
-        try:
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password
-            )
-
-            # ایجاد Agent
-            agent = Agent.objects.create(
-                user=user,
-                agent_type=agent_type,
-                company_name=company_name,
-                contact_email=contact_email,
-                contact_phone=contact_phone,
-                commission_rate=commission_rate
-            )
-
-            # اختصاص Sellerها (اگر مشخص شده باشند)
-            seller_ids = request.data.get('seller_ids', [])
-            if seller_ids:
-                sellers = Seller.objects.filter(id__in=seller_ids)
-                agent.assigned_sellers.set(sellers)
-
-            return Response({
-                'success': True,
-                'message': 'Agent created successfully',
-                'agent_id': str(agent.id),
-                'user_id': user.id
-            }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            # در صورت خطا، کاربر ایجاد شده را پاک کن
-            if 'user' in locals():
-                user.delete()
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class ProductChannelsAPIView(APIView):
@@ -283,12 +33,17 @@ class ProductChannelsAPIView(APIView):
             # پیدا کردن محصول بر اساس نوع کاربر
             if hasattr(user, 'admin_profile'):
                 product = Product.objects.get(id=product_id)
-            elif hasattr(user, 'seller'):
-                product = Product.objects.get(id=product_id, owner=user.seller)
-            elif hasattr(user, 'agent'):
+            elif hasattr(user, 'seller_profile'):
+                product = Product.objects.get(id=product_id, owner=user.seller_profile)
+            elif hasattr(user, 'agent_profile'):
+                # بررسی تأیید شدن Agent
+                if not user.agent_profile.is_approved:
+                    return Response({
+                        'error': 'Agent not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
                 product = Product.objects.get(
                     id=product_id,
-                    owner__in=user.agent.assigned_sellers.all()
+                    owner__in=user.agent_profile.managed_sellers.all()
                 )
             else:
                 return Response({
@@ -343,16 +98,26 @@ class BulkRefreshAPIView(APIView):
         products_query = Product.objects.filter(id__in=product_ids)
 
         # فیلتر بر اساس نوع کاربر
-        if hasattr(user, 'seller'):
-            products_query = products_query.filter(owner=user.seller)
-        elif hasattr(user, 'agent'):
-            products_query = products_query.filter(owner__in=user.agent.assigned_sellers.all())
+        if hasattr(user, 'seller_profile'):
+            # بررسی تأیید شدن Seller
+            if not user.seller_profile.is_approved:
+                return Response({
+                    'error': 'Seller not approved'
+                }, status=status.HTTP_403_FORBIDDEN)
+            products_query = products_query.filter(owner=user.seller_profile)
+        elif hasattr(user, 'agent_profile'):
+            # بررسی تأیید شدن Agent
+            if not user.agent_profile.is_approved:
+                return Response({
+                    'error': 'Agent not approved'
+                }, status=status.HTTP_403_FORBIDDEN)
+            products_query = products_query.filter(owner__in=user.agent_profile.managed_sellers.all())
         # ادمین همه را می‌بیند، اما می‌تواند فیلتر کند
         elif hasattr(user, 'admin_profile') and seller_id:
             try:
-                seller = Seller.objects.get(id=seller_id)
+                seller = SellerProfile.objects.get(id=seller_id)
                 products_query = products_query.filter(owner=seller)
-            except Seller.DoesNotExist:
+            except SellerProfile.DoesNotExist:
                 pass
 
         products = list(products_query)
@@ -399,16 +164,26 @@ class BulkSendAPIView(APIView):
         products_query = Product.objects.filter(id__in=product_ids)
 
         # فیلتر بر اساس نوع کاربر
-        if hasattr(user, 'seller'):
-            products_query = products_query.filter(owner=user.seller)
-        elif hasattr(user, 'agent'):
-            products_query = products_query.filter(owner__in=user.agent.assigned_sellers.all())
+        if hasattr(user, 'seller_profile'):
+            # بررسی تأیید شدن Seller
+            if not user.seller_profile.is_approved:
+                return Response({
+                    'error': 'Seller not approved'
+                }, status=status.HTTP_403_FORBIDDEN)
+            products_query = products_query.filter(owner=user.seller_profile)
+        elif hasattr(user, 'agent_profile'):
+            # بررسی تأیید شدن Agent
+            if not user.agent_profile.is_approved:
+                return Response({
+                    'error': 'Agent not approved'
+                }, status=status.HTTP_403_FORBIDDEN)
+            products_query = products_query.filter(owner__in=user.agent_profile.managed_sellers.all())
         # ادمین همه را می‌بیند، اما می‌تواند فیلتر کند
         elif hasattr(user, 'admin_profile') and seller_id:
             try:
-                seller = Seller.objects.get(id=seller_id)
+                seller = SellerProfile.objects.get(id=seller_id)
                 products_query = products_query.filter(owner=seller)
-            except Seller.DoesNotExist:
+            except SellerProfile.DoesNotExist:
                 pass
 
         products = list(products_query)
@@ -447,6 +222,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrSellerOrAgentForAssigned]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Product.objects.none()
+
         user = self.request.user
 
         # اگر Admin است، همه محصولات را ببیند
@@ -456,14 +234,20 @@ class ProductViewSet(viewsets.ModelViewSet):
             ).order_by('-created_at')
 
         # اگر Seller است، فقط محصولات خودش
-        if hasattr(user, 'seller'):
-            return Product.objects.filter(owner=user.seller).select_related(
+        if hasattr(user, 'seller_profile'):
+            # بررسی تأیید شدن Seller
+            if not user.seller_profile.is_approved:
+                return Product.objects.none()
+            return Product.objects.filter(owner=user.seller_profile).select_related(
                 'country', 'amazon_product'
             ).order_by('-created_at')
 
         # اگر Agent است، محصولات فروشندگان اختصاص‌یافته
-        if hasattr(user, 'agent'):
-            assigned_sellers = user.agent.assigned_sellers.all()
+        if hasattr(user, 'agent_profile'):
+            # بررسی تأیید شدن Agent
+            if not user.agent_profile.is_approved:
+                return Product.objects.none()
+            assigned_sellers = user.agent_profile.managed_sellers.all()
             return Product.objects.filter(owner__in=assigned_sellers).select_related(
                 'country', 'amazon_product', 'owner'
             ).order_by('-created_at')
@@ -475,9 +259,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         return ProductSerializer
 
     def get_permissions(self):
-        """
-        سفارشی‌سازی permissions برای actionهای مختلف
-        """
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAuthenticated(), IsAdminOrSeller()]
         return [permissions.IsAuthenticated(), IsAdminOrSellerOrAgentForAssigned()]
@@ -495,28 +276,33 @@ class ProductViewSet(viewsets.ModelViewSet):
             seller_id = data.get('seller_id')
             if seller_id:
                 try:
-                    owner = Seller.objects.get(id=seller_id)
-                except Seller.DoesNotExist:
+                    owner = SellerProfile.objects.get(id=seller_id)
+                except SellerProfile.DoesNotExist:
                     raise serializers.ValidationError({'seller_id': 'Seller not found'})
             else:
-                # اگر ادمین Seller مشخص نکرده، خطا
                 raise serializers.ValidationError({'seller_id': 'seller_id is required for admin users'})
 
-        elif hasattr(user, 'seller'):
+        elif hasattr(user, 'seller_profile'):
+            # بررسی تأیید شدن Seller
+            if not user.seller_profile.is_approved:
+                raise serializers.ValidationError({'detail': 'Seller not approved'})
             # Seller فقط می‌تواند برای خودش محصول ایجاد کند
-            owner = user.seller
+            owner = user.seller_profile
 
-        elif hasattr(user, 'agent'):
+        elif hasattr(user, 'agent_profile'):
+            # بررسی تأیید شدن Agent
+            if not user.agent_profile.is_approved:
+                raise serializers.ValidationError({'detail': 'Agent not approved'})
             # Agent می‌تواند برای فروشندگان اختصاص‌یافته محصول ایجاد کند
             seller_id = data.get('seller_id')
             if seller_id:
                 try:
-                    seller = Seller.objects.get(id=seller_id)
+                    seller = SellerProfile.objects.get(id=seller_id)
                     # بررسی اینکه فروشنده به این Agent اختصاص داده شده باشد
-                    if seller not in user.agent.assigned_sellers.all():
+                    if seller not in user.agent_profile.managed_sellers.all():
                         raise serializers.ValidationError({'seller_id': 'Seller is not assigned to this agent'})
                     owner = seller
-                except Seller.DoesNotExist:
+                except SellerProfile.DoesNotExist:
                     raise serializers.ValidationError({'seller_id': 'Seller not found'})
             else:
                 raise serializers.ValidationError({'seller_id': 'seller_id is required for agent users'})
@@ -642,16 +428,26 @@ class ProductViewSet(viewsets.ModelViewSet):
         products_query = Product.objects.filter(id__in=product_ids)
 
         # فیلتر بر اساس نوع کاربر
-        if hasattr(user, 'seller'):
-            products_query = products_query.filter(owner=user.seller)
-        elif hasattr(user, 'agent'):
-            products_query = products_query.filter(owner__in=user.agent.assigned_sellers.all())
+        if hasattr(user, 'seller_profile'):
+            # بررسی تأیید شدن Seller
+            if not user.seller_profile.is_approved:
+                return Response({
+                    'error': 'Seller not approved'
+                }, status=status.HTTP_403_FORBIDDEN)
+            products_query = products_query.filter(owner=user.seller_profile)
+        elif hasattr(user, 'agent_profile'):
+            # بررسی تأیید شدن Agent
+            if not user.agent_profile.is_approved:
+                return Response({
+                    'error': 'Agent not approved'
+                }, status=status.HTTP_403_FORBIDDEN)
+            products_query = products_query.filter(owner__in=user.agent_profile.managed_sellers.all())
         # ادمین همه را می‌بیند، اما می‌تواند فیلتر کند
         elif hasattr(user, 'admin_profile') and seller_id:
             try:
-                seller = Seller.objects.get(id=seller_id)
+                seller = SellerProfile.objects.get(id=seller_id)
                 products_query = products_query.filter(owner=seller)
-            except Seller.DoesNotExist:
+            except SellerProfile.DoesNotExist:
                 pass
 
         products = list(products_query)
@@ -709,7 +505,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
             return Response({
                 'success': True,
-                'message': f'Stopped {products.count()} products'
+                'message': f'Stopped {len(products)} products'
             })
 
         elif action_type == 'resume':
@@ -718,7 +514,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
             return Response({
                 'success': True,
-                'message': f'Resumed {products.count()} products'
+                'message': f'Resumed {len(products)} products'
             })
 
         else:
@@ -743,8 +539,8 @@ class ProductViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            seller = Seller.objects.get(id=seller_id)
-        except Seller.DoesNotExist:
+            seller = SellerProfile.objects.get(id=seller_id)
+        except SellerProfile.DoesNotExist:
             return Response({
                 'error': 'Seller not found'
             }, status=status.HTTP_404_NOT_FOUND)
@@ -910,13 +706,23 @@ class ChannelAPIView(APIView):
             channel = TelegramChannel.objects.get(id=channel_id, is_active=True)
 
             # بررسی دسترسی کاربر به محصول
-            if hasattr(user, 'seller'):
-                if product.owner != user.seller:
+            if hasattr(user, 'seller_profile'):
+                # بررسی تأیید شدن Seller
+                if not user.seller_profile.is_approved:
+                    return Response({
+                        'error': 'Seller not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner != user.seller_profile:
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
-            elif hasattr(user, 'agent'):
-                if product.owner not in user.agent.assigned_sellers.all():
+            elif hasattr(user, 'agent_profile'):
+                # بررسی تأیید شدن Agent
+                if not user.agent_profile.is_approved:
+                    return Response({
+                        'error': 'Agent not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner not in user.agent_profile.managed_sellers.all():
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
@@ -1087,13 +893,23 @@ class ProductMessagesAPIView(APIView):
             product = Product.objects.get(id=product_id)
 
             # بررسی دسترسی
-            if hasattr(user, 'seller'):
-                if product.owner != user.seller:
+            if hasattr(user, 'seller_profile'):
+                # بررسی تأیید شدن Seller
+                if not user.seller_profile.is_approved:
+                    return Response({
+                        'error': 'Seller not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner != user.seller_profile:
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
-            elif hasattr(user, 'agent'):
-                if product.owner not in user.agent.assigned_sellers.all():
+            elif hasattr(user, 'agent_profile'):
+                # بررسی تأیید شدن Agent
+                if not user.agent_profile.is_approved:
+                    return Response({
+                        'error': 'Agent not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner not in user.agent_profile.managed_sellers.all():
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
@@ -1151,13 +967,23 @@ class ProductMessagesAPIView(APIView):
             )
 
             # بررسی دسترسی
-            if hasattr(user, 'seller'):
-                if product.owner != user.seller:
+            if hasattr(user, 'seller_profile'):
+                # بررسی تأیید شدن Seller
+                if not user.seller_profile.is_approved:
+                    return Response({
+                        'error': 'Seller not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner != user.seller_profile:
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
-            elif hasattr(user, 'agent'):
-                if product.owner not in user.agent.assigned_sellers.all():
+            elif hasattr(user, 'agent_profile'):
+                # بررسی تأیید شدن Agent
+                if not user.agent_profile.is_approved:
+                    return Response({
+                        'error': 'Agent not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner not in user.agent_profile.managed_sellers.all():
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
@@ -1211,13 +1037,23 @@ class ProductMessagesAPIView(APIView):
             )
 
             # بررسی دسترسی
-            if hasattr(user, 'seller'):
-                if product.owner != user.seller:
+            if hasattr(user, 'seller_profile'):
+                # بررسی تأیید شدن Seller
+                if not user.seller_profile.is_approved:
+                    return Response({
+                        'error': 'Seller not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner != user.seller_profile:
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
-            elif hasattr(user, 'agent'):
-                if product.owner not in user.agent.assigned_sellers.all():
+            elif hasattr(user, 'agent_profile'):
+                # بررسی تأیید شدن Agent
+                if not user.agent_profile.is_approved:
+                    return Response({
+                        'error': 'Agent not approved'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                if product.owner not in user.agent_profile.managed_sellers.all():
                     return Response({
                         'error': 'Access denied'
                     }, status=status.HTTP_403_FORBIDDEN)
@@ -1248,393 +1084,148 @@ class ProductMessagesAPIView(APIView):
             'message': 'Message deleted successfully'
         })
 
-class UserRegistrationAPIView(APIView):
-    """ثبت نام کاربر جدید (Seller یا Agent)"""
-    permission_classes = [permissions.AllowAny]
 
-    def post(self, request):
-        user_type = request.data.get('user_type')  # 'seller' یا 'agent'
-        username = request.data.get('username')
-        email = request.data.get('email')
-        password = request.data.get('password')
-        company_name = request.data.get('company_name')
-        contact_email = request.data.get('contact_email')
-        contact_phone = request.data.get('contact_phone', '')
-
-        if not all([user_type, username, email, password, company_name, contact_email]):
-            return Response({
-                'error': 'Missing required fields'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if user_type not in ['seller', 'agent']:
-            return Response({
-                'error': 'user_type must be either "seller" or "agent"'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # بررسی وجود کاربر
-        if User.objects.filter(username=username).exists():
-            return Response({
-                'error': 'Username already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if User.objects.filter(email=email).exists():
-            return Response({
-                'error': 'Email already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            # ایجاد کاربر
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password
-            )
-
-            # ایجاد پروفایل بر اساس نوع کاربر
-            if user_type == 'seller':
-                seller = Seller.objects.create(
-                    user=user,
-                    seller_type='seller',
-                    company_name=company_name,
-                    contact_email=contact_email,
-                    contact_phone=contact_phone,
-                    is_verified=False  # باید توسط ادمین تأیید شود
-                )
-                profile_id = str(seller.id)
-                profile_type = 'seller'
-            else:
-                agent = Agent.objects.create(
-                    user=user,
-                    agent_type='external',
-                    company_name=company_name,
-                    contact_email=contact_email,
-                    contact_phone=contact_phone,
-                    is_active=False  # باید توسط ادمین فعال شود
-                )
-                profile_id = str(agent.id)
-                profile_type = 'agent'
-
-            # ارسال ایمیل تایید
-            self._send_confirmation_email(user, user_type)
-
-            return Response({
-                'success': True,
-                'message': 'Registration successful. Please wait for admin approval.',
-                'user_id': user.id,
-                'profile_id': profile_id,
-                'profile_type': profile_type
-            }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            # حذف کاربر در صورت خطا
-            if 'user' in locals():
-                user.delete()
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def _send_confirmation_email(self, user, user_type):
-        """ارسال ایمیل تأیید (پیاده‌سازی ساده)"""
-        # TODO: پیاده‌سازی ارسال ایمیل واقعی
-        print(f"Confirmation email sent to {user.email} for {user_type} registration")
-
-
-class AdminUsersAPIView(APIView):
-    """مدیریت کاربران توسط ادمین"""
+class SellerManagementAPIView(APIView):
+    """مدیریت فروشندگان توسط ادمین"""
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
     def get(self, request):
-        """لیست همه کاربران"""
-        # کاربران عادی (کاربران Django)
-        users = User.objects.all().select_related(
-            'seller', 'agent', 'admin_profile'
-        ).order_by('-date_joined')
+        """دریافت لیست فروشندگان"""
+        sellers = SellerProfile.objects.all().select_related('user').order_by('-created_at')
 
-        user_list = []
-        for user in users:
-            user_data = {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'date_joined': user.date_joined.isoformat(),
-                'is_active': user.is_active,
-                'is_staff': user.is_staff,
-                'is_superuser': user.is_superuser,
-                'roles': []
-            }
-
-            # تشخیص نقش‌ها
-            if hasattr(user, 'admin_profile'):
-                user_data['roles'].append('admin')
-                user_data['admin_role'] = user.admin_profile.role
-            if hasattr(user, 'seller'):
-                user_data['roles'].append('seller')
-                user_data['seller_info'] = {
-                    'id': str(user.seller.id),
-                    'company_name': user.seller.company_name,
-                    'is_verified': user.seller.is_verified
-                }
-            if hasattr(user, 'agent'):
-                user_data['roles'].append('agent')
-                user_data['agent_info'] = {
-                    'id': str(user.agent.id),
-                    'company_name': user.agent.company_name,
-                    'is_active': user.agent.is_active
-                }
-
-            user_list.append(user_data)
+        seller_list = []
+        for seller in sellers:
+            seller_list.append({
+                'id': seller.id,
+                'user_id': seller.user.id,
+                'username': seller.user.username,
+                'email': seller.user.email,
+                'company_name': seller.company_name,
+                'contact_email': seller.contact_email,
+                'contact_phone': seller.contact_phone,
+                'is_approved': seller.is_approved,
+                'approved_by': seller.approved_by.username if seller.approved_by else None,
+                'approved_at': seller.approved_at.isoformat() if seller.approved_at else None,
+                'rating': seller.rating,
+                'total_contracts': seller.total_contracts,
+                'completed_contracts': seller.completed_contracts,
+                'assigned_agent': seller.assigned_agent.id if seller.assigned_agent else None,
+                'assigned_agent_name': seller.assigned_agent.company_name if seller.assigned_agent else None,
+                'created_at': seller.created_at.isoformat(),
+                'updated_at': seller.updated_at.isoformat()
+            })
 
         return Response({
-            'users': user_list,
-            'count': len(user_list)
+            'sellers': seller_list,
+            'count': len(seller_list)
         })
 
     def post(self, request):
-        """ایجاد کاربر جدید توسط ادمین"""
-        username = request.data.get('username')
-        email = request.data.get('email')
-        password = request.data.get('password')
-        role = request.data.get('role')  # 'admin', 'seller', 'agent'
-        user_data = request.data.get('user_data', {})
+        """تأیید یا عدم تأیید فروشنده"""
+        seller_id = request.data.get('seller_id')
+        action = request.data.get('action')  # 'approve' یا 'disapprove'
+        reason = request.data.get('reason', '')
 
-        if not all([username, email, password, role]):
+        if not seller_id or not action:
             return Response({
-                'error': 'Missing required fields'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if User.objects.filter(username=username).exists():
-            return Response({
-                'error': 'Username already exists'
+                'error': 'seller_id and action are required'
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # ایجاد کاربر
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password,
-                is_active=True
-            )
-
-            if role == 'admin':
-                # ایجاد ادمین
-                admin_role = user_data.get('admin_role', 'admin')
-                AdminProfile.objects.create(
-                    user=user,
-                    role=admin_role,
-                    permissions=user_data.get('permissions', {})
-                )
-                user.is_staff = True
-                user.save()
-
-            elif role == 'seller':
-                # ایجاد سلر
-                Seller.objects.create(
-                    user=user,
-                    seller_type=user_data.get('seller_type', 'seller'),
-                    company_name=user_data.get('company_name', ''),
-                    contact_email=user_data.get('contact_email', email),
-                    contact_phone=user_data.get('contact_phone', ''),
-                    is_verified=True  # ادمین خودش ایجاد کرده، پس تأیید شده است
-                )
-
-            elif role == 'agent':
-                # ایجاد ایجنت
-                Agent.objects.create(
-                    user=user,
-                    agent_type=user_data.get('agent_type', 'external'),
-                    company_name=user_data.get('company_name', ''),
-                    contact_email=user_data.get('contact_email', email),
-                    contact_phone=user_data.get('contact_phone', ''),
-                    is_active=True
-                )
-
+            seller = SellerProfile.objects.get(id=seller_id)
+        except SellerProfile.DoesNotExist:
             return Response({
-                'success': True,
-                'message': f'{role.capitalize()} created successfully',
-                'user_id': user.id
-            }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            if 'user' in locals():
-                user.delete()
-            return Response({
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def put(self, request, user_id):
-        """ویرایش وضعیت کاربر"""
-        action = request.data.get('action')
-        data = request.data.get('data', {})
-
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response({
-                'error': 'User not found'
+                'error': 'Seller not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        if action == 'activate':
-            user.is_active = True
-            user.save()
-
-            # فعال کردن پروفایل مرتبط
-            if hasattr(user, 'seller'):
-                user.seller.is_verified = True
-                user.seller.save()
-            elif hasattr(user, 'agent'):
-                user.agent.is_active = True
-                user.agent.save()
-
-            return Response({
-                'success': True,
-                'message': 'User activated successfully'
-            })
-
-        elif action == 'deactivate':
-            user.is_active = False
-            user.save()
-            return Response({
-                'success': True,
-                'message': 'User deactivated successfully'
-            })
-
-        elif action == 'update_role':
-            # حذف نقش‌های قبلی
-            if hasattr(user, 'admin_profile'):
-                user.admin_profile.delete()
-            if hasattr(user, 'seller'):
-                user.seller.delete()
-            if hasattr(user, 'agent'):
-                user.agent.delete()
-
-            # ایجاد نقش جدید
-            role = data.get('role')
-            if role == 'admin':
-                AdminProfile.objects.create(
-                    user=user,
-                    role=data.get('admin_role', 'admin')
-                )
-                user.is_staff = True
-                user.save()
-            elif role == 'seller':
-                Seller.objects.create(
-                    user=user,
-                    seller_type=data.get('seller_type', 'seller'),
-                    company_name=data.get('company_name', ''),
-                    contact_email=data.get('contact_email', user.email),
-                    contact_phone=data.get('contact_phone', ''),
-                    is_verified=True
-                )
-            elif role == 'agent':
-                Agent.objects.create(
-                    user=user,
-                    agent_type=data.get('agent_type', 'external'),
-                    company_name=data.get('company_name', ''),
-                    contact_email=data.get('contact_email', user.email),
-                    contact_phone=data.get('contact_phone', ''),
-                    is_active=True
-                )
-
-            return Response({
-                'success': True,
-                'message': f'User role updated to {role}'
-            })
-
+        if action == 'approve':
+            seller.approve(request.user)
+            message = 'Seller approved successfully'
+        elif action == 'disapprove':
+            seller.disapprove()
+            message = 'Seller disapproved successfully'
         else:
             return Response({
-                'error': f'Unknown action: {action}'
+                'error': 'Invalid action. Use "approve" or "disapprove"'
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        return Response({
+            'success': True,
+            'message': message,
+            'seller_id': seller.id,
+            'is_approved': seller.is_approved
+        })
 
-class CountryManagementAPIView(APIView):
-    """مدیریت کشورها توسط ادمین"""
+
+class AgentManagementAPIView(APIView):
+    """مدیریت نمایندگان توسط ادمین"""
     permission_classes = [permissions.IsAuthenticated, IsAdmin]
 
     def get(self, request):
-        """دریافت لیست کشورها"""
-        countries = Country.objects.all().order_by('display_order')
+        """دریافت لیست نمایندگان"""
+        agents = AgentProfile.objects.all().select_related('user').order_by('-created_at')
 
-        country_list = []
-        for country in countries:
-            country_list.append({
-                'code': country.code,
-                'name': country.name,
-                'native_name': country.native_name,
-                'amazon_domain': country.amazon_domain,
-                'amazon_url': country.amazon_url,
-                'default_currency': country.default_currency.code if country.default_currency else None,
-                'timezone': country.timezone,
-                'language': country.language,
-                'default_zip_code': country.default_zip_code,
-                'default_city': country.default_city,
-                'default_state': country.default_state,
-                'is_active': country.is_active,
-                'is_available_for_products': country.is_available_for_products,
-                'is_available_for_crawling': country.is_available_for_crawling,
-                'display_order': country.display_order,
-                'has_channels': country.get_related_channels().exists(),
-                'icon_url': country.get_icon_url(),
-                'flag_url': country.get_flag_url(),
-                'created_at': country.created_at.isoformat() if country.created_at else None,
-                'updated_at': country.updated_at.isoformat() if country.updated_at else None
+        agent_list = []
+        for agent in agents:
+            agent_list.append({
+                'id': agent.id,
+                'user_id': agent.user.id,
+                'username': agent.user.username,
+                'email': agent.user.email,
+                'agent_type': agent.agent_type,
+                'agent_type_display': agent.get_agent_type_display(),
+                'company_name': agent.company_name,
+                'contact_email': agent.contact_email,
+                'contact_phone': agent.contact_phone,
+                'is_approved': agent.is_approved,
+                'approved_by': agent.approved_by.username if agent.approved_by else None,
+                'approved_at': agent.approved_at.isoformat() if agent.approved_at else None,
+                'commission_rate': float(agent.commission_rate),
+                'assigned_sellers_count': agent.assigned_sellers.count(),
+                'created_at': agent.created_at.isoformat(),
+                'updated_at': agent.updated_at.isoformat()
             })
 
         return Response({
-            'countries': country_list,
-            'count': len(country_list)
+            'agents': agent_list,
+            'count': len(agent_list)
         })
 
     def post(self, request):
-        """ایجاد کشور جدید"""
-        serializer = CountrySerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({
-                'success': True,
-                'message': 'Country created successfully',
-                'country': serializer.data
-            }, status=status.HTTP_201_CREATED)
-        return Response({
-            'error': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+        """تأیید یا عدم تأیید نماینده"""
+        agent_id = request.data.get('agent_id')
+        action = request.data.get('action')  # 'approve' یا 'disapprove'
+        reason = request.data.get('reason', '')
 
-    def put(self, request, country_code):
-        """ویرایش کشور"""
-        try:
-            country = Country.objects.get(code=country_code)
-        except Country.DoesNotExist:
+        if not agent_id or not action:
             return Response({
-                'error': 'Country not found'
+                'error': 'agent_id and action are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            agent = AgentProfile.objects.get(id=agent_id)
+        except AgentProfile.DoesNotExist:
+            return Response({
+                'error': 'Agent not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = CountrySerializer(country, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
+        if action == 'approve':
+            agent.approve(request.user)
+            message = 'Agent approved successfully'
+        elif action == 'disapprove':
+            agent.disapprove()
+            message = 'Agent disapproved successfully'
+        else:
             return Response({
-                'success': True,
-                'message': 'Country updated successfully',
-                'country': serializer.data
-            })
-        return Response({
-            'error': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+                'error': 'Invalid action. Use "approve" or "disapprove"'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, country_code):
-        """حذف کشور"""
-        try:
-            country = Country.objects.get(code=country_code)
-            country.delete()
-            return Response({
-                'success': True,
-                'message': 'Country deleted successfully'
-            })
-        except Country.DoesNotExist:
-            return Response({
-                'error': 'Country not found'
-            }, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'success': True,
+            'message': message,
+            'agent_id': agent.id,
+            'is_approved': agent.is_approved
+        })
 
 
 class DashboardStatsAPIView(APIView):
@@ -1644,10 +1235,10 @@ class DashboardStatsAPIView(APIView):
     def get(self, request):
         """دریافت آمار کلی"""
         # آمار کاربران
-        total_users = User.objects.count()
-        active_users = User.objects.filter(is_active=True).count()
-        sellers_count = Seller.objects.count()
-        agents_count = Agent.objects.count()
+        total_users = CustomUser.objects.count()
+        active_users = CustomUser.objects.filter(is_active=True).count()
+        sellers_count = SellerProfile.objects.count()
+        agents_count = AgentProfile.objects.count()
         admins_count = AdminProfile.objects.count()
 
         # آمار محصولات
@@ -1669,8 +1260,8 @@ class DashboardStatsAPIView(APIView):
         recent_products_data = ProductSerializer(recent_products, many=True).data
 
         # کاربران منتظر تأیید
-        pending_sellers = Seller.objects.filter(is_verified=False).count()
-        pending_agents = Agent.objects.filter(is_active=False).count()
+        pending_sellers = SellerProfile.objects.filter(is_approved=False).count()
+        pending_agents = AgentProfile.objects.filter(is_approved=False).count()
 
         return Response({
             'users': {

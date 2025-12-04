@@ -102,6 +102,7 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only in development
 
 ROOT_URLCONF = 'backend.urls'
+AUTH_USER_MODEL = 'auth_app.CustomUser'
 
 TEMPLATES = [
     {
